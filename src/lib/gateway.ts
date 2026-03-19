@@ -1,68 +1,44 @@
 import { genId } from './utils';
 import type { DeviceIdentity } from './deviceIdentity';
-import { buildDeviceAuthPayload, signPayload } from './deviceIdentity';
 import type { AuthMode } from './credentials';
 
-/** Debug logger — enable with localStorage.setItem('pinchchat:debug', '1') */
 const isDebug = () => {
   try { return localStorage.getItem('pinchchat:debug') === '1'; } catch { return false; }
 };
-const log = (...args: unknown[]) => { if (isDebug()) console.log('[GW]', ...args); };
+const log = (...args: unknown[]) => { if (isDebug()) console.log('[GW-Clawbot]', ...args); };
 
-/** JSON-safe payload type used for gateway messages. */
 export type JsonPayload = Record<string, unknown>;
 
 export type GatewayEventHandler = (event: string, payload: JsonPayload) => void;
 export type GatewayResponseHandler = (id: string, ok: boolean, payload: JsonPayload) => void;
 
-/** Shape of an incoming WebSocket message from the gateway. */
-interface GatewayMessage {
-  type: 'event' | 'res';
-  // event fields
-  event?: string;
-  payload?: JsonPayload;
-  // response fields
-  id?: string;
-  ok?: boolean;
-  error?: string;
-}
-
 export type GatewayStatus = 'disconnected' | 'connecting' | 'connected' | 'pairing';
 
 export class GatewayClient {
   private ws: WebSocket | null = null;
-  private pendingRequests = new Map<string, { resolve: (v: JsonPayload) => void; reject: (e: unknown) => void }>();
   private eventHandlers: GatewayEventHandler[] = [];
   private _onStatus: (s: GatewayStatus) => void = () => {};
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private connected = false;
   private autoReconnect = true;
-  private connectNonce: string | null = null;
 
   private wsUrl: string;
-  private authToken: string;
-  private authMode: AuthMode = 'token';
-  private deviceIdentity: DeviceIdentity | null = null;
-  private clientId: string;
+  
+  private currentRunId: string | null = null;
+  private currentText = '';
+  private readonly fixedSessionKey = 'agent:main:main';
+  private localHistory: any[] = [];
 
-  constructor(wsUrl?: string, authToken?: string, authMode?: AuthMode, clientId?: string) {
-    this.wsUrl = wsUrl || `ws://${window.location.hostname}:18789`;
-    this.authToken = authToken || '';
-    this.authMode = authMode || 'token';
-    this.clientId = clientId || import.meta.env.VITE_CLIENT_ID || 'webchat';
+  constructor(wsUrl?: string, _authToken?: string, _authMode?: AuthMode, _clientId?: string) {
+    this.wsUrl = wsUrl || `ws://${window.location.hostname}:8787/ws`;
   }
 
-  /** Update credentials (e.g. after login). Does not reconnect automatically. */
-  setCredentials(wsUrl: string, authToken: string, authMode?: AuthMode) {
+  setCredentials(wsUrl: string, _authToken: string, _authMode?: AuthMode) {
     this.wsUrl = wsUrl;
-    this.authToken = authToken;
-    if (authMode) this.authMode = authMode;
   }
 
-  /** Set the device identity for signed connect handshakes. */
-  setDeviceIdentity(identity: DeviceIdentity) {
-    this.deviceIdentity = identity;
+  setDeviceIdentity(_identity: DeviceIdentity) {
   }
 
   onStatus(fn: (s: GatewayStatus) => void) {
@@ -77,34 +53,32 @@ export class GatewayClient {
   connect() {
     if (this.ws) return;
     this.autoReconnect = true;
-    this.connectNonce = null;
     this._onStatus('connecting');
+    
+    if (this.wsUrl.includes(':18789')) {
+      this.wsUrl = this.wsUrl.replace(':18789', ':8787/ws');
+    }
+
+    log('Connecting to', this.wsUrl);
     this.ws = new WebSocket(this.wsUrl);
 
-    this.ws.onopen = () => { log('WS open'); };
+    this.ws.onopen = () => {
+      log('WS open');
+      this.connected = true;
+      this.reconnectAttempts = 0;
+      this._onStatus('connected');
+    };
 
     this.ws.onmessage = (ev) => {
-      let msg: GatewayMessage;
-      try { msg = JSON.parse(ev.data as string) as GatewayMessage; } catch { log('parse error', ev.data); return; }
-      log('msg:', msg.type, msg.event || msg.id || '', msg.ok);
+      let data: any;
+      try { data = JSON.parse(ev.data as string); } catch { log('parse error', ev.data); return; }
+      log('Received:', data);
 
-      if (msg.type === 'event') {
-        if (msg.event === 'connect.challenge') {
-          // Extract nonce from challenge payload if present
-          const payload = msg.payload as Record<string, unknown> | undefined;
-          this.connectNonce = (payload && typeof payload.nonce === 'string') ? payload.nonce : null;
-          this.handleChallenge();
-        } else {
-          for (const h of this.eventHandlers) h(msg.event ?? '', msg.payload ?? {});
-        }
-      } else if (msg.type === 'res' && msg.id) {
-        const pending = this.pendingRequests.get(msg.id);
-        if (pending) {
-          this.pendingRequests.delete(msg.id);
-          if (msg.ok) pending.resolve(msg.payload ?? {});
-          else pending.reject(msg.payload ?? msg.error ?? 'unknown error');
-        }
+      if (data.eventId) {
+        this.sendAck(data.eventId);
       }
+
+      this.handleClawbotMessage(data);
     };
 
     this.ws.onclose = (ev) => {
@@ -112,85 +86,73 @@ export class GatewayClient {
       this.ws = null;
       this.connected = false;
       this._onStatus('disconnected');
-      this.pendingRequests.forEach(p => p.reject(new Error('disconnected')));
-      this.pendingRequests.clear();
       if (this.autoReconnect) this.scheduleReconnect();
     };
 
     this.ws.onerror = (e) => { log('WS error', e); };
   }
 
-  private async handleChallenge() {
-    const id = genId('connect');
-    const role = 'operator';
-    const scopes = ['operator.read', 'operator.write', 'operator.admin'];
-    const signedAtMs = Date.now();
-    const nonce = this.connectNonce ?? undefined;
+  private sendAck(eventId: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const ack = {
+      type: "ack",
+      eventId: eventId
+    };
+    this.ws.send(JSON.stringify(ack));
+  }
 
-    // Build device object if we have an identity
-    let device: Record<string, unknown> | undefined;
-    if (this.deviceIdentity) {
-      const payload = buildDeviceAuthPayload({
-        deviceId: this.deviceIdentity.id,
-        clientId: this.clientId,
-        clientMode: 'webchat',
-        role,
-        scopes,
-        signedAtMs,
-        token: this.authMode === 'password' ? null : (this.authToken || null),
-        nonce,
-      });
-      const signature = await signPayload(this.deviceIdentity.keyPair.privateKey, payload);
-      device = {
-        id: this.deviceIdentity.id,
-        publicKey: this.deviceIdentity.publicKeyRaw,
-        signature,
-        signedAt: signedAtMs,
-        nonce,
-      };
+  private handleClawbotMessage(data: any) {
+    if (!this.currentRunId) {
+      this.currentRunId = genId('run');
+      this.currentText = '';
     }
 
-    try {
-      const res = await this.request(id, 'connect', {
-        minProtocol: 3,
-        maxProtocol: 3,
-        client: { id: this.clientId, version: __APP_VERSION__, platform: 'web', mode: 'webchat' },
-        role,
-        scopes,
-        caps: [],
-        commands: [],
-        permissions: {},
-        auth: this.authMode === 'password' ? { password: this.authToken } : { token: this.authToken },
-        device,
-        locale: (typeof navigator !== 'undefined' ? navigator.language : undefined) || 'en',
-        userAgent: `pinchchat/${__APP_VERSION__}`,
+    if (data.content) {
+      this.currentText += data.content;
+      this.emitChatEvent({
+        state: 'delta',
+        runId: this.currentRunId,
+        sessionKey: this.fixedSessionKey,
+        message: {
+          text: this.currentText
+        }
       });
-      log('connected!', res);
-      this.connected = true;
-      this.reconnectAttempts = 0;
-      this._onStatus('connected');
-    } catch (err) {
-      log('connect failed:', err);
-      // Check if this is a NOT_PAIRED error
-      const errObj = err as Record<string, unknown> | undefined;
-      if (errObj && (errObj.code === 'NOT_PAIRED' || (typeof errObj.message === 'string' && errObj.message.includes('NOT_PAIRED')))) {
-        log('device not paired — awaiting approval');
-        this._onStatus('pairing');
-        // Keep connection open and auto-reconnect; gateway may close us
-        return;
+    }
+
+    if (data.eventType === 'final' || data.done) {
+      this.emitChatEvent({
+        state: 'final',
+        runId: this.currentRunId,
+        sessionKey: this.fixedSessionKey,
+        message: {
+           text: ''
+        }
+      });
+
+      if (this.currentText) {
+        this.localHistory.push({
+          id: this.currentRunId,
+          role: 'assistant',
+          content: this.currentText,
+          timestamp: Date.now()
+        });
       }
-      this.autoReconnect = false;
-      this.disconnect();
+
+      this.currentRunId = null;
+      this.currentText = '';
     }
+  }
+
+  private emitChatEvent(payload: JsonPayload) {
+    for (const h of this.eventHandlers) h('chat', payload);
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
     const base = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    const jitter = Math.random() * base * 0.3;
-    const delay = base + jitter;
+    const delay = base + (Math.random() * base * 0.3);
     this.reconnectAttempts++;
-    log(`reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+    log(`reconnecting in ${Math.round(delay)}ms`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
@@ -206,20 +168,86 @@ export class GatewayClient {
     this._onStatus('disconnected');
   }
 
-  request(id: string, method: string, params: JsonPayload): Promise<JsonPayload> {
+  request(_id: string, method: string, params: JsonPayload): Promise<JsonPayload> {
+    log('RPC Request:', method, params);
+
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        return reject(new Error('not connected'));
-      }
-      this.pendingRequests.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ type: 'req', id, method, params }));
-      setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error('timeout'));
+      setTimeout(async () => {
+        try {
+          const result = await this.handleRpc(method, params);
+          resolve(result);
+        } catch (e) {
+          reject(e);
         }
-      }, 30000);
+      }, 10);
     });
+  }
+
+  private async handleRpc(method: string, params: JsonPayload): Promise<JsonPayload> {
+    switch (method) {
+      case 'sessions.list':
+        return {
+          sessions: [{
+            key: this.fixedSessionKey,
+            label: 'Clawbot Agent',
+            agentId: 'main',
+            updatedAt: Date.now(),
+            model: 'clawbot-v1'
+          }]
+        };
+
+      case 'chat.history':
+        return { messages: [...this.localHistory] };
+
+      case 'agent.identity.get':
+        return {
+          name: 'Clawbot',
+          agentId: 'main',
+          emoji: '🤖'
+        };
+
+      case 'chat.send':
+        await this.sendToClawbot(params);
+        return { success: true };
+
+      case 'chat.abort':
+        return { success: true };
+
+      case 'sessions.create':
+      case 'sessions.patch':
+      case 'sessions.delete':
+        return { key: this.fixedSessionKey };
+
+      default:
+        console.warn('Unknown method mocked:', method);
+        return {};
+    }
+  }
+
+  private async sendToClawbot(params: JsonPayload) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('not connected');
+    }
+
+    const text = params.message as string;
+    
+    this.localHistory.push({
+      id: genId('msg'),
+      role: 'user',
+      content: text,
+      timestamp: Date.now()
+    });
+
+    const msg = {
+      messageId: genId('msg'),
+      channel: 'transport',
+      chatId: 'main',
+      senderId: 'user',
+      content: text,
+      sessionKey: this.fixedSessionKey
+    };
+
+    this.ws.send(JSON.stringify(msg));
   }
 
   async send(method: string, params: JsonPayload): Promise<JsonPayload> {
