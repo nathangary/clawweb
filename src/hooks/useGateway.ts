@@ -1,335 +1,134 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GatewayClient, type JsonPayload } from '../lib/gateway';
-import { genIdempotencyKey } from '../lib/utils';
-import { getStoredCredentials, storeCredentials, clearCredentials, type AuthMode } from '../lib/credentials';
-import { getOrCreateDeviceIdentity } from '../lib/deviceIdentity';
-import { getCachedMessages, setCachedMessages, mergeWithCache } from '../lib/messageCache';
-import { extractAgentIdFromKey } from '../lib/sessionName';
-import { extractText, extractThinking, type ChatPayloadMessage } from '../lib/messageExtract';
-import { parseHistoryMessages } from '../lib/historyParser';
-import type { ChatMessage, MessageBlock, ConnectionStatus, Session, AgentIdentity } from '../types';
+import { NanobotGatewayClient, type NanobotOutboundEvent } from '../lib/nanobotGateway';
+import { NanobotApiClient } from '../lib/nanobotApi';
+import { genId } from '../lib/utils';
+import { getStoredCredentials, storeCredentials, clearCredentials } from '../lib/credentials';
+import type { ChatMessage, MessageBlock, ConnectionStatus, Session } from '../types';
 
 export function useGateway() {
-  const clientRef = useRef<GatewayClient | null>(null);
+  const wsClientRef = useRef<NanobotGatewayClient | null>(null);
+  const apiClientRef = useRef<NanobotApiClient | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState(import.meta.env.VITE_AGENT_SESSION || 'agent:main:main');
+  const [activeSession, setActiveSession] = useState('transport:web');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null); // null = checking
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const isConnectingRef = useRef(false);
   const messagesRef = useRef(messages);
   const activeSessionRef = useRef(activeSession);
-
   const sessionsRef = useRef(sessions);
+  const currentEventIdRef = useRef<string | null>(null);
 
-  // Sync refs in an effect to avoid ref writes during render
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
-  const currentRunIdRef = useRef<string | null>(null);
-  const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set());
-  const [unreadSessions, setUnreadSessions] = useState<Map<string, number>>(new Map());
-  const [agentIdentity, setAgentIdentity] = useState<AgentIdentity | null>(null);
-  /** Map of runId → generation duration (ms), preserved across loadHistory reloads */
-  const generationTimesRef = useRef<Map<string, number>>(new Map());
 
-  const handleAgentEvent = useCallback((payload: JsonPayload) => {
-    if (payload?.stream !== 'tool') return;
-    const data = (payload.data ?? {}) as Record<string, unknown>;
-    const phase = data.phase as string | undefined;
-    const toolCallId = data.toolCallId as string | undefined;
-    const name = (data.name as string) || 'tool';
-    if (!toolCallId) return;
-
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (!last || last.role !== 'assistant' || !last.isStreaming) return prev;
-
-      const updated = { ...last, blocks: [...last.blocks] };
-
-      if (phase === 'start') {
-        updated.blocks.push({
-          type: 'tool_use' as const,
-          name,
-          input: (data.args as Record<string, unknown>) ?? {},
-          id: toolCallId,
-        });
-      } else if (phase === 'result') {
-        const rawResult = data.result;
-        const result = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult, null, 2);
-        updated.blocks.push({
-          type: 'tool_result' as const,
-          content: result?.slice(0, 500) || '',
-          toolUseId: toolCallId,
-          name,
-        });
-      }
-
-      return [...prev.slice(0, -1), updated];
-    });
-  }, []);
-
-  // Deleted sessions blacklist (persisted in localStorage)
-  const getDeletedSessions = useCallback((): Set<string> => {
-    try {
-      const raw = localStorage.getItem('pinchchat-deleted-sessions');
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch { return new Set(); }
-  }, []);
-
-  const addDeletedSession = useCallback((key: string) => {
-    const deleted = getDeletedSessions();
-    deleted.add(key);
-    localStorage.setItem('pinchchat-deleted-sessions', JSON.stringify([...deleted]));
-  }, [getDeletedSessions]);
-
-  const loadAgentIdentity = useCallback(async () => {
-    try {
-      const res = await clientRef.current?.send('agent.identity.get', { sessionKey: activeSessionRef.current });
-      if (res) {
-        setAgentIdentity({
-          name: res.name as string | undefined,
-          emoji: res.emoji as string | undefined,
-          avatar: res.avatar as string | undefined,
-          agentId: res.agentId as string | undefined,
-        });
-      }
-    } catch {
-      // Silently ignore — identity is optional
-    }
-  }, []);
-
-  const loadSessions = useCallback(async () => {
-    try {
-      const res = await clientRef.current?.send('sessions.list', {});
-      const sessionList = res?.sessions as Array<Record<string, unknown>> | undefined;
-      if (sessionList) {
-        const agentPrefix = import.meta.env.VITE_AGENT_PREFIX;
-        const filteredSessionList = agentPrefix
-          ? sessionList.filter((s) => ((s.key || s.sessionKey) as string).startsWith(agentPrefix))
-          : sessionList;
-        const deleted = getDeletedSessions();
-        // Reconcile: remove blacklisted keys for sessions that no longer exist on the gateway
-        // (they were successfully deleted, so no need to keep hiding them)
-        const activeKeys = new Set(filteredSessionList.map((s) => (s.key || s.sessionKey) as string));
-        const reconciled = new Set([...deleted].filter((k) => activeKeys.has(k)));
-        if (reconciled.size !== deleted.size) {
-          localStorage.setItem('pinchchat-deleted-sessions', JSON.stringify([...reconciled]));
+  const handleEvent = useCallback((event: NanobotOutboundEvent) => {
+    const eventSession = event.sessionKey;
+    const eventChatId = event.chatId;
+    const activeSess = activeSessionRef.current;
+    
+    if (activeSess.startsWith('transport:')) {
+      const activeChatId = activeSess.replace('transport:', '');
+      if (eventChatId !== activeChatId) {
+        if (eventChatId && eventChatId.startsWith('web-')) {
+          const newSession = `transport:${eventChatId}`;
+          setActiveSession(newSession);
+          activeSessionRef.current = newSession;
+        } else {
+          return;
         }
-        setSessions(filteredSessionList.filter((s) => !deleted.has((s.key || s.sessionKey) as string)).map((s) => ({
-          key: (s.key || s.sessionKey) as string,
-          label: (s.label || s.key || s.sessionKey) as string,
-          messageCount: s.messageCount as number | undefined,
-          totalTokens: s.totalTokens as number | undefined,
-          contextTokens: s.contextTokens as number | undefined,
-          inputTokens: s.inputTokens as number | undefined,
-          outputTokens: s.outputTokens as number | undefined,
-          channel: (s.lastChannel || s.channel) as string | undefined,
-          kind: s.kind as string | undefined,
-          model: s.model as string | undefined,
-          agentId: s.agentId as string | undefined,
-          updatedAt: s.updatedAt as number | undefined,
-          lastMessagePreview: s.lastMessagePreview as string | undefined,
-        })));
       }
-    } catch {
-      // Silently ignore session list failures (e.g. disconnected)
+    } else if (eventSession && eventSession !== activeSess) {
+      return;
     }
-  }, [getDeletedSessions]);
 
-  const loadHistory = useCallback(async (sessionKey: string) => {
-    setIsLoadingHistory(true);
-    try {
-      const res = await clientRef.current?.send('chat.history', { sessionKey, limit: 100 });
-      const rawMsgs = res?.messages as Array<Record<string, unknown>> | undefined;
-      if (rawMsgs) {
-        const merged = parseHistoryMessages(rawMsgs as Array<Record<string, any>>); // eslint-disable-line @typescript-eslint/no-explicit-any
-        // Apply stored generation time to the last assistant message if available
-        const genKey = sessionKey + ':latest';
-        const genTime = generationTimesRef.current.get(genKey);
-        if (genTime) {
-          generationTimesRef.current.delete(genKey);
-          for (let i = merged.length - 1; i >= 0; i--) {
-            if (merged[i].role === 'assistant') {
-              merged[i] = { ...merged[i], generationTimeMs: genTime };
-              break;
+    wsClientRef.current?.ack(event.eventId);
+
+    if (event.eventType === 'progress') {
+      const text = event.content;
+      const toolHint = event.metadata?._tool_hint;
+
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.isStreaming && last.runId === event.eventId) {
+          const updated = { ...last };
+          if (text) updated.content = text;
+          const blocks: MessageBlock[] = [];
+          if (toolHint) {
+            const toolInfo = extractToolInfo(toolHint);
+            if (toolInfo) {
+              blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
             }
           }
+          if (text) blocks.push({ type: 'text', text });
+          updated.blocks = blocks;
+          return [...prev.slice(0, -1), updated];
         }
-        // Merge with cached messages to preserve pre-compaction history
-        const cached = await getCachedMessages(sessionKey);
-        const { messages: finalMessages, wasCompacted } = mergeWithCache(merged, cached);
-
-        if (wasCompacted) {
-          // Store the full merged set so future loads keep the archive
-          setCachedMessages(sessionKey, finalMessages.filter(m => !m.isCompactionSeparator));
-        } else {
-          // No compaction — update cache with latest gateway messages
-          setCachedMessages(sessionKey, merged);
-        }
-
-        setMessages(finalMessages);
-      }
-    } catch {
-      // Silently ignore history load failures
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  }, []);
-
-  const setupClient = useCallback(async (wsUrl: string, token: string, authMode: AuthMode = 'token', clientId?: string) => {
-    // Tear down existing client
-    if (clientRef.current) {
-      clientRef.current.disconnect();
-    }
-
-    const client = new GatewayClient(wsUrl, token, authMode, clientId);
-    clientRef.current = client;
-
-    // Load device identity for signed connect handshake
-    try {
-      const identity = await getOrCreateDeviceIdentity();
-      client.setDeviceIdentity(identity);
-    } catch (err) {
-      console.warn('[PinchChat] Failed to load device identity, connecting without it:', err);
-    }
-
-    client.onStatus((s) => {
-      setStatus(s);
-      if (s === 'connected') {
-        setAuthenticated(true);
-        setConnectError(null);
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        storeCredentials(wsUrl, token, authMode, clientId);
-        loadSessions();
-        loadAgentIdentity();
-        loadHistory(activeSessionRef.current);
-      } else if (s === 'pairing') {
-        setAuthenticated(true);
-        setConnectError(null);
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-      } else if (s === 'disconnected' && !client.isConnected) {
-        // If we never connected successfully, this is an auth/connection error
-        if (isConnectingRef.current) {
-          setConnectError('Connection failed — check URL and token');
-          setIsConnecting(false);
-          isConnectingRef.current = false;
-          setAuthenticated(false);
-        }
-      }
-    });
-
-    client.onEvent((event, payload) => {
-      if (event === 'agent') {
-        handleAgentEvent(payload);
-        return;
-      }
-      if (event !== 'chat') return;
-
-      const state = payload.state as string | undefined;
-      const runId = payload.runId as string;
-      const message = payload.message as ChatPayloadMessage | undefined;
-      const errorMessage = payload.errorMessage as string | undefined;
-      const evtSession = payload.sessionKey as string | undefined;
-
-      if (evtSession) {
-        if (state === 'delta') {
-          setActiveSessions(prev => {
-            if (prev.has(evtSession)) return prev;
-            const next = new Set(prev);
-            next.add(evtSession);
-            return next;
-          });
-        } else if (state === 'final' || state === 'error' || state === 'aborted') {
-          setActiveSessions(prev => {
-            if (!prev.has(evtSession)) return prev;
-            const next = new Set(prev);
-            next.delete(evtSession);
-            return next;
-          });
-        }
-      }
-
-      if (evtSession !== activeSessionRef.current) {
-        // Mark non-active sessions as unread when they receive a final message
-        if (state === 'final' && evtSession) {
-          setUnreadSessions(prev => {
-            const next = new Map(prev);
-            next.set(evtSession, (prev.get(evtSession) || 0) + 1);
-            return next;
-          });
-        }
-        return;
-      }
-
-      if (state === 'delta') {
-        const text = extractText(message);
-        const thinking = extractThinking(message);
-        currentRunIdRef.current = runId;
-
-        setMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === 'assistant' && last.isStreaming && last.runId === runId) {
-            const updated = { ...last };
-            updated.content = text;
-            // Preserve tool blocks, rebuild text + thinking blocks from latest delta
-            const toolBlocks = updated.blocks.filter(b => b.type === 'tool_use' || b.type === 'tool_result');
-            const newBlocks: MessageBlock[] = [];
-            if (thinking) newBlocks.push({ type: 'thinking' as const, text: thinking });
-            newBlocks.push(...toolBlocks);
-            newBlocks.push({ type: 'text' as const, text });
-            updated.blocks = newBlocks;
-            return [...prev.slice(0, -1), updated];
+        const blocks: MessageBlock[] = [];
+        if (toolHint) {
+          const toolInfo = extractToolInfo(toolHint);
+          if (toolInfo) {
+            blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
           }
-          const blocks: MessageBlock[] = [];
-          if (thinking) blocks.push({ type: 'thinking' as const, text: thinking });
-          blocks.push({ type: 'text' as const, text });
-          const msg: ChatMessage = {
-            id: runId + '-' + Date.now(),
-            role: 'assistant',
-            content: text,
-            timestamp: Date.now(),
-            blocks,
-            isStreaming: true,
-            runId,
-            streamStartedAt: Date.now(),
-          };
-          return [...prev, msg];
-        });
-      } else if (state === 'final') {
-        // Compute generation time from the streaming message before history reload replaces it
+        }
+        if (text) blocks.push({ type: 'text', text });
+        const msg: ChatMessage = {
+          id: event.eventId,
+          role: 'assistant',
+          content: text || '',
+          timestamp: Date.now(),
+          blocks,
+          isStreaming: true,
+          runId: event.eventId,
+          streamStartedAt: Date.now(),
+        };
+        return [...prev, msg];
+      });
+    } else if (event.eventType === 'tool_hint') {
+      const toolContent = event.content;
+      if (toolContent) {
+        const toolInfo = extractToolInfo(toolContent);
+        if (toolInfo) {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === 'assistant' && last.isStreaming) {
+              const updated = { ...last, blocks: [...last.blocks] };
+              const existingToolIndex = updated.blocks.findIndex(
+                b => b.type === 'tool_use' && b.id === event.eventId
+              );
+              if (existingToolIndex === -1) {
+                updated.blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
+              }
+              return [...prev.slice(0, -1), updated];
+            }
+            return prev;
+          });
+        }
+      }
+    } else if (event.eventType === 'final') {
+      if (currentEventIdRef.current) {
         const lastMsg = messagesRef.current[messagesRef.current.length - 1];
         if (lastMsg?.role === 'assistant' && lastMsg.streamStartedAt) {
-          generationTimesRef.current.set(activeSessionRef.current + ':latest', Date.now() - lastMsg.streamStartedAt);
+          const genTime = Date.now() - lastMsg.streamStartedAt;
+          lastMsg.generationTimeMs = genTime;
         }
-        currentRunIdRef.current = null;
-        setIsGenerating(false);
-        loadHistory(activeSessionRef.current);
-      } else if (state === 'error') {
-        currentRunIdRef.current = null;
-        setIsGenerating(false);
+      }
+      currentEventIdRef.current = null;
+      setIsGenerating(false);
+      if (event.content) {
         setMessages(prev => {
           const last = prev[prev.length - 1];
-          if (last && last.role === 'assistant' && last.isStreaming && last.runId === runId) {
-            return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+          if (last && last.role === 'assistant' && last.isStreaming) {
+            return [...prev.slice(0, -1), { ...last, isStreaming: false, content: event.content }];
           }
-          return [...prev, {
-            id: 'error-' + Date.now(),
-            role: 'assistant' as const,
-            content: `Error: ${errorMessage || 'unknown error'}`,
-            timestamp: Date.now(),
-            blocks: [{ type: 'text' as const, text: `Error: ${errorMessage || 'unknown error'}` }],
-          }];
+          return prev;
         });
-      } else if (state === 'aborted') {
-        currentRunIdRef.current = null;
-        setIsGenerating(false);
+      } else {
         setMessages(prev => {
           const last = prev[prev.length - 1];
           if (last && last.role === 'assistant' && last.isStreaming) {
@@ -338,23 +137,122 @@ export function useGateway() {
           return prev;
         });
       }
+      loadHistory(activeSessionRef.current);
+    } else if (event.eventType === 'error') {
+      currentEventIdRef.current = null;
+      setIsGenerating(false);
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.isStreaming) {
+          return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+        }
+        return [...prev, {
+          id: 'error-' + Date.now(),
+          role: 'assistant' as const,
+          content: `Error: ${event.content || 'Unknown error'}`,
+          timestamp: Date.now(),
+          blocks: [{ type: 'text' as const, text: `Error: ${event.content || 'Unknown error'}` }],
+        }];
+      });
+    }
+  }, []);
+
+  function extractToolInfo(hint: unknown): { name: string; args: Record<string, unknown> } | null {
+    if (typeof hint !== 'string') return null;
+    const match = hint.match(/^(\w+)\("(.*)"\)$/);
+    if (match) {
+      return { name: match[1], args: { input: match[2] } };
+    }
+    return { name: 'tool', args: { input: String(hint) } };
+  }
+
+  const loadSessions = useCallback(async () => {
+    if (!apiClientRef.current) return;
+    try {
+      const res = await apiClientRef.current.getSessions();
+      if (res.applied && res.data.sessions) {
+        setSessions(res.data.sessions.map(s => ({
+          key: s.key,
+          label: s.key,
+          messageCount: s.message_count || s.messageCount,
+        })));
+      }
+    } catch {
+      setSessions([]);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async (sessionKey: string) => {
+    if (!apiClientRef.current) return;
+    setIsLoadingHistory(true);
+    try {
+      const res = await apiClientRef.current.getSessionHistory(sessionKey, 1, 100, 'asc');
+      if (res.applied && res.data.messages) {
+        const msgs: ChatMessage[] = res.data.messages.map((m, i) => ({
+          id: `${sessionKey}-${i}`,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: new Date(m.timestamp).getTime(),
+          blocks: [{ type: 'text' as const, text: m.content }],
+        }));
+        setMessages(msgs);
+      }
+    } catch {
+      setMessages([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  const setupClient = useCallback((wsUrl: string, token?: string, restUrl?: string) => {
+    if (wsClientRef.current) {
+      wsClientRef.current.disconnect();
+    }
+    const apiUrl = restUrl || `http://${new URL(wsUrl).hostname}:18790`;
+    if (!apiClientRef.current) {
+      apiClientRef.current = new NanobotApiClient(apiUrl, token);
+    } else {
+      apiClientRef.current.setCredentials(apiUrl, token);
+    }
+
+    const client = new NanobotGatewayClient(wsUrl, token);
+    wsClientRef.current = client;
+
+    client.onStatus((s) => {
+      setStatus(s);
+      if (s === 'connected') {
+        setAuthenticated(true);
+        setConnectError(null);
+        setIsConnecting(false);
+        isConnectingRef.current = false;
+        storeCredentials(wsUrl, token, restUrl);
+        loadSessions();
+        loadHistory(activeSessionRef.current);
+      } else if (s === 'disconnected' && !client.isConnected) {
+        if (isConnectingRef.current) {
+          setConnectError('Connection failed — check URL');
+          setIsConnecting(false);
+          isConnectingRef.current = false;
+          setAuthenticated(false);
+        }
+      }
     });
+
+    client.onEvent(handleEvent);
 
     setIsConnecting(true);
     isConnectingRef.current = true;
     setConnectError(null);
     client.connect();
-  }, [handleAgentEvent, loadHistory, loadSessions, loadAgentIdentity]);
+  }, [handleEvent, loadHistory, loadSessions]);
 
-  // On mount: try stored credentials
   const initRef = useRef(false);
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
     const stored = getStoredCredentials();
     if (stored) {
-      // Init on mount — setupClient sets state as part of establishing the connection
-      setupClient(stored.url, stored.token, stored.authMode || 'token', stored.clientId);
+      setupClient(stored.url, stored.token, stored.restUrl);
     } else {
       setAuthenticated(false);
     }
@@ -377,28 +275,16 @@ export function useGateway() {
     setIsGenerating(true);
 
     try {
-      await clientRef.current?.send('chat.send', {
-        sessionKey: activeSessionRef.current,
-        message: text,
-        deliver: false,
-        idempotencyKey: genIdempotencyKey(),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      });
-      // Mark as sent
+      wsClientRef.current?.send(text, attachments);
+      currentEventIdRef.current = genId('event');
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'sent' as const } : m));
     } catch {
-      // Mark as error and stop generating
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'error' as const } : m));
       setIsGenerating(false);
     }
   }, []);
 
   const abort = useCallback(async () => {
-    try {
-      await clientRef.current?.send('chat.abort', { sessionKey: activeSessionRef.current });
-    } catch {
-      // Ignore abort failures
-    }
     setIsGenerating(false);
   }, []);
 
@@ -406,89 +292,23 @@ export function useGateway() {
     setActiveSession(key);
     activeSessionRef.current = key;
     setMessages([]);
-    setUnreadSessions(prev => {
-      if (!prev.has(key)) return prev;
-      const next = new Map(prev);
-      next.delete(key);
-      return next;
-    });
     loadHistory(key);
   }, [loadHistory]);
 
-  const createSessionWithConfig = useCallback(async (agentId: string, channel: string) => {
-    const client = clientRef.current;
-    if (!client) return;
-
-    const expectedPrefix = `agent:${agentId}:`;
-    const fallbackKey = `${expectedPrefix}webchat-${Date.now()}`;
-    let nextKey = fallbackKey;
-
-    try {
-      const res = await client.send('sessions.create', { channel, agentId }) as JsonPayload | undefined;
-      const fromRoot = (typeof res?.key === 'string' && res.key)
-        || (typeof res?.sessionKey === 'string' && res.sessionKey)
-        || null;
-      const nestedSession = (res?.session && typeof res.session === 'object') ? res.session as Record<string, unknown> : null;
-      const fromNested = (nestedSession && typeof nestedSession.key === 'string' && nestedSession.key)
-        || (nestedSession && typeof nestedSession.sessionKey === 'string' && nestedSession.sessionKey)
-        || null;
-
-      const returnedKey = (fromRoot || fromNested) as string | null;
-      if (returnedKey && returnedKey.startsWith(expectedPrefix)) {
-        nextKey = returnedKey;
-      }
-    } catch (err) {
-      console.warn('[createSession] sessions.create not supported, using fallback key', err);
-    }
-
-    switchSession(nextKey);
-    try {
-      await loadSessions();
-    } catch (err) {
-      console.warn('[createSession] failed to refresh session list', err);
-    }
-  }, [switchSession, loadSessions]);
-
   const createNewSession = useCallback(async () => {
-    const currentKey = activeSessionRef.current;
-    const currentSession = sessionsRef.current.find((s) => s.key === currentKey);
-    const targetAgentId = currentSession?.agentId || extractAgentIdFromKey(currentKey) || 'main';
-    const targetChannel = currentSession?.channel || 'webchat';
-    await createSessionWithConfig(targetAgentId, targetChannel);
-  }, [createSessionWithConfig]);
+    const newChatId = `web-${Date.now()}`;
+    const newSessionKey = `transport:${newChatId}`;
+    switchSession(newSessionKey);
+  }, [switchSession]);
 
-  const createSessionForAgent = useCallback(async (agentId: string) => {
-    await createSessionWithConfig(agentId, 'webchat');
-  }, [createSessionWithConfig]);
-
-  const login = useCallback((url: string, token: string, authMode: AuthMode = 'token', clientId?: string) => {
-    setupClient(url, token, authMode, clientId);
+  const login = useCallback((url: string, token?: string, restUrl?: string) => {
+    setupClient(url, token, restUrl);
   }, [setupClient]);
 
-  const deleteSession = useCallback(async (key: string) => {
-    try {
-      await clientRef.current?.send('sessions.delete', { key, deleteTranscript: true });
-    } catch {
-      // Ignore delete failures — blacklist will hide it anyway
-    }
-    // Persist to blacklist so it stays hidden after refresh
-    addDeletedSession(key);
-    // Remove from local state
-    setSessions(prev => prev.filter(s => s.key !== key));
-    // If we deleted the active session, switch to main
-    if (activeSessionRef.current === key) {
-      const mainKey = 'agent:main:main';
-      setActiveSession(mainKey);
-      activeSessionRef.current = mainKey;
-      setMessages([]);
-      loadHistory(mainKey);
-    }
-  }, [loadHistory, addDeletedSession]);
-
   const logout = useCallback(() => {
-    if (clientRef.current) {
-      clientRef.current.disconnect();
-      clientRef.current = null;
+    if (wsClientRef.current) {
+      wsClientRef.current.disconnect();
+      wsClientRef.current = null;
     }
     clearCredentials();
     setAuthenticated(false);
@@ -498,7 +318,6 @@ export function useGateway() {
     setConnectError(null);
   }, []);
 
-  // Periodic session refresh every 30s
   useEffect(() => {
     if (status !== 'connected') return;
     const interval = setInterval(loadSessions, 30000);
@@ -507,23 +326,17 @@ export function useGateway() {
 
   const enrichedSessions = sessions.map(s => ({
     ...s,
-    isActive: activeSessions.has(s.key),
-    hasUnread: unreadSessions.has(s.key),
-    unreadCount: unreadSessions.get(s.key) || 0,
+    isActive: false,
+    hasUnread: false,
+    unreadCount: 0,
   }));
 
-  const getClient = useCallback(() => clientRef.current, []);
-
-  const addEventListener = useCallback((fn: (event: string, payload: JsonPayload) => void) => {
-    const client = clientRef.current;
-    if (!client) return () => {};
-    return client.onEvent(fn);
-  }, []);
+  const getClient = useCallback(() => wsClientRef.current, []);
 
   return {
     status, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
-    sendMessage, abort, switchSession, createNewSession, createSessionForAgent, loadSessions, deleteSession,
-    authenticated, login, logout, connectError, isConnecting, agentIdentity,
-    getClient, addEventListener,
+    sendMessage, abort, switchSession, createNewSession, loadSessions,
+    authenticated, login, logout, connectError, isConnecting,
+    getClient,
   };
 }

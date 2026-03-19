@@ -29,61 +29,21 @@ function getSavedSplitRatio(): number {
 export default function App() {
   const {
     status, messages, sessions, activeSession, isGenerating, isLoadingHistory,
-    sendMessage, abort, switchSession, deleteSession, createNewSession, createSessionForAgent,
-    authenticated, login, logout, connectError, isConnecting, agentIdentity,
-    getClient, addEventListener,
+    sendMessage, abort, switchSession, createNewSession,
+    authenticated, login, logout, connectError, isConnecting,
+    getClient,
   } = useGateway();
   const [splitSession, setSplitSession] = useState<string | null>(null);
   const [splitRatio, setSplitRatio] = useState(getSavedSplitRatio);
   const [splitDragging, setSplitDragging] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
-  const secondary = useSecondarySession(getClient, addEventListener, splitSession);
+  const secondary = useSecondarySession(getClient, splitSession);
   const t = useT();
-  const resolveAgentDisplayName = useCallback((sessionKey: string | null | undefined): string | undefined => {
-    if (!sessionKey) return agentIdentity?.name;
-    const session = sessions.find((s) => s.key === sessionKey);
-    const sessionAgentId = session?.agentId || extractAgentIdFromKey(sessionKey);
-    const connectedAgentId = agentIdentity?.agentId;
-
-    // agent.identity.get is gateway-level (typically main agent), not per-session.
-    // For sub-agent sessions, prefer the session agent id to avoid showing the main agent name.
-    if (sessionAgentId && connectedAgentId && sessionAgentId !== connectedAgentId) {
-      return formatAgentId(sessionAgentId) || sessionAgentId;
-    }
-    return agentIdentity?.name || (sessionAgentId && formatAgentId(sessionAgentId)) || sessionAgentId;
-  }, [agentIdentity?.name, agentIdentity?.agentId, sessions]);
   const handleSplit = useCallback((key: string) => {
     setSplitSession(prev => prev === key ? null : key);
   }, []);
 
-  const handleCompact = useCallback(async (key: string): Promise<boolean> => {
-    const client = getClient();
-    if (!client) return false;
-    try {
-      const res = await client.send('sessions.compact', { key });
-      // Reload history after compaction to reflect new state
-      if (res?.compacted) {
-        switchSession(key);
-      }
-      return !!res?.compacted;
-    } catch {
-      return false;
-    }
-  }, [getClient, switchSession]);
-
-  const handleRename = useCallback(async (key: string, label: string): Promise<boolean> => {
-    const client = getClient();
-    if (!client) return false;
-    try {
-      await client.send('sessions.patch', { key, label });
-      return true;
-    } catch {
-      return false;
-    }
-  }, [getClient]);
-
-  // Split pane drag
   useEffect(() => {
     if (!splitDragging) return;
     const onMove = (e: MouseEvent) => {
@@ -112,7 +72,6 @@ export default function App() {
   const { notify, soundEnabled, toggleSound } = useNotifications();
   const prevMessageCountRef = useRef(messages.length);
 
-  // Notify on new assistant messages when tab is not focused
   useEffect(() => {
     const prevCount = prevMessageCountRef.current;
     prevMessageCountRef.current = messages.length;
@@ -125,26 +84,22 @@ export default function App() {
     }
   }, [messages, notify]);
 
-  // Update document title with active session label
   useEffect(() => {
     const session = sessions.find(s => s.key === activeSession);
     setBaseTitle(session?.label || session?.key);
     return () => setBaseTitle(undefined);
   }, [activeSession, sessions]);
 
-  // Keyboard shortcuts: Escape, ?, Alt+↑/↓ for session navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape' && sidebarOpen) {
       setSidebarOpen(false);
     }
-    // Open shortcuts help with ? (only when not typing in an input)
     if (e.key === '?' && !shortcutsOpen) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
       e.preventDefault();
       setShortcutsOpen(true);
     }
-    // Alt+↑ / Alt+↓ — switch to previous/next session
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault();
       if (sessions.length < 2) return;
@@ -162,7 +117,9 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  // Still checking stored credentials
+  const sessionAgentId = activeSession ? extractAgentIdFromKey(activeSession) : null;
+  const agentName = sessionAgentId ? formatAgentId(sessionAgentId) || sessionAgentId : undefined;
+
   if (authenticated === null) {
     return (
       <div className="h-dvh flex items-center justify-center bg-[var(--pc-bg-base)] text-pc-text-muted">
@@ -171,38 +128,35 @@ export default function App() {
     );
   }
 
-  // Not authenticated — show login
   if (!authenticated) {
     return <LoginScreen onConnect={login} error={connectError} isConnecting={isConnecting} />;
   }
 
   return (
     <ToolCollapseProvider>
-    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial_gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="PinchChat">
+    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="PinchChat">
       <a href="#chat-input" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-pc-accent focus:text-white focus:text-sm focus:font-medium">{t('app.skipToChat')}</a>
       <Sidebar
         sessions={sessions}
         activeSession={activeSession}
         onSwitch={switchSession}
-        onDelete={deleteSession}
+        onDelete={() => {}}
         onSplit={handleSplit}
         splitSession={splitSession}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        onRename={handleRename}
+        onRename={() => Promise.resolve(false)}
         onNewSession={createNewSession}
-        onNewSessionForAgent={createSessionForAgent}
+        onNewSessionForAgent={() => Promise.resolve()}
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
-        {/* Primary pane */}
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
-          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={agentIdentity?.avatar} agentName={resolveAgentDisplayName(activeSession)} onCompact={handleCompact} />
+          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={undefined} agentName={agentName} onCompact={() => Promise.resolve(false)} />
           <ConnectionBanner status={status} />
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-pc-text-muted"><div className="animate-pulse text-sm">Loading…</div></div>}>
-            <Chat messages={messages} isGenerating={isGenerating} isLoadingHistory={isLoadingHistory} status={status} sessionKey={activeSession} onSend={sendMessage} onNewSession={createNewSession} onAbort={abort} agentAvatarUrl={agentIdentity?.avatar} agentName={resolveAgentDisplayName(activeSession)} />
+            <Chat messages={messages} isGenerating={isGenerating} isLoadingHistory={isLoadingHistory} status={status} sessionKey={activeSession} onSend={sendMessage} onNewSession={createNewSession} onAbort={abort} agentAvatarUrl={undefined} agentName={agentName} />
           </Suspense>
         </main>
-        {/* Split divider + secondary pane */}
         {splitSession && (
           <>
             <div
@@ -212,7 +166,6 @@ export default function App() {
               aria-orientation="vertical"
             />
             <section className="flex flex-col min-w-0" style={{ width: `${100 - splitRatio}%` }} aria-label={t('app.splitPane')}>
-              {/* Secondary header */}
               <div className="flex items-center gap-2 px-3 py-2 border-b border-pc-border bg-[var(--pc-bg-surface)]">
                 <span className="text-sm font-medium text-pc-text truncate flex-1">
                   {(() => { const s = sessions.find(s => s.key === splitSession); return s ? sessionDisplayName(s) : splitSession; })()}
@@ -227,7 +180,7 @@ export default function App() {
                 </button>
               </div>
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-pc-text-muted"><div className="animate-pulse text-sm">Loading…</div></div>}>
-                <Chat messages={secondary.messages} isGenerating={secondary.isGenerating} isLoadingHistory={secondary.isLoadingHistory} status={status} sessionKey={splitSession} onSend={secondary.sendMessage} onNewSession={createNewSession} onAbort={secondary.abort} agentAvatarUrl={agentIdentity?.avatar} agentName={resolveAgentDisplayName(splitSession)} />
+                <Chat messages={secondary.messages} isGenerating={secondary.isGenerating} isLoadingHistory={secondary.isLoadingHistory} status={status} sessionKey={splitSession} onSend={secondary.sendMessage} onNewSession={createNewSession} onAbort={secondary.abort} agentAvatarUrl={undefined} agentName={undefined} />
               </Suspense>
             </section>
           </>
