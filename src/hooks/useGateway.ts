@@ -332,11 +332,12 @@ export function useGateway() {
   }));
 
   const getClient = useCallback(() => wsClientRef.current, []);
+  const getApiClient = useCallback(() => apiClientRef.current, []);
 
   return {
     status, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
     sendMessage, abort, switchSession, createNewSession, loadSessions,
     authenticated, login, logout, connectError, isConnecting,
-    getClient,
+    getClient, getApiClient,
   };
 }

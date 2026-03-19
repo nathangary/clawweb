@@ -8,6 +8,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ToolCollapseProvider } from './contexts/ToolCollapseContext';
+import { DashboardPanel } from './components/Dashboard/DashboardPanel';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from './lib/sessionName';
 import { X } from 'lucide-react';
 import { useT } from './hooks/useLocale';
@@ -31,11 +32,12 @@ export default function App() {
     status, messages, sessions, activeSession, isGenerating, isLoadingHistory,
     sendMessage, abort, switchSession, createNewSession,
     authenticated, login, logout, connectError, isConnecting,
-    getClient,
+    getClient, getApiClient,
   } = useGateway();
   const [splitSession, setSplitSession] = useState<string | null>(null);
   const [splitRatio, setSplitRatio] = useState(getSavedSplitRatio);
   const [splitDragging, setSplitDragging] = useState(false);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
   const secondary = useSecondarySession(getClient, splitSession);
@@ -94,6 +96,9 @@ export default function App() {
     if (e.key === 'Escape' && sidebarOpen) {
       setSidebarOpen(false);
     }
+    if (e.key === 'Escape' && dashboardOpen) {
+      setDashboardOpen(false);
+    }
     if (e.key === '?' && !shortcutsOpen) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
@@ -110,7 +115,7 @@ export default function App() {
         : (idx + 1) % sessions.length;
       switchSession(sessions[next].key);
     }
-  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession]);
+  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -151,7 +156,7 @@ export default function App() {
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
-          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={undefined} agentName={agentName} onCompact={() => Promise.resolve(false)} />
+          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={undefined} agentName={agentName} onCompact={() => Promise.resolve(false)} onOpenDashboard={() => setDashboardOpen(true)} />
           <ConnectionBanner status={status} />
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-pc-text-muted"><div className="animate-pulse text-sm">Loading…</div></div>}>
             <Chat messages={messages} isGenerating={isGenerating} isLoadingHistory={isLoadingHistory} status={status} sessionKey={activeSession} onSend={sendMessage} onNewSession={createNewSession} onAbort={abort} agentAvatarUrl={undefined} agentName={agentName} />
@@ -187,6 +192,12 @@ export default function App() {
         )}
       </div>
       <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {dashboardOpen && (
+        <DashboardPanel
+          apiClient={getApiClient()}
+          onClose={() => setDashboardOpen(false)}
+        />
+      )}
     </div>
     </ToolCollapseProvider>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, forwardRef } from 'react';
-import { Menu, Sparkles, LogOut, Cpu, Bot, Download, Minimize2, Info, Copy, Check, Settings } from 'lucide-react';
+import { Menu, Sparkles, LogOut, Cpu, Bot, Download, Minimize2, Info, Copy, Check, Settings, LayoutDashboard } from 'lucide-react';
 import type { ConnectionStatus, Session, ChatMessage } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SettingsModal } from './SettingsModal';
@@ -19,9 +19,10 @@ interface Props {
   agentAvatarUrl?: string;
   agentName?: string;
   onCompact?: (sessionKey: string) => Promise<boolean>;
+  onOpenDashboard?: () => void;
 }
 
-export function Header({ status, sessionKey, onToggleSidebar, activeSessionData, onLogout, soundEnabled, onToggleSound, messages, agentAvatarUrl, agentName, onCompact }: Props) {
+export function Header({ status, sessionKey, onToggleSidebar, activeSessionData, onLogout, soundEnabled, onToggleSound, messages, agentAvatarUrl, agentName, onCompact, onOpenDashboard }: Props) {
   const t = useT();
   const sessionLabel = activeSessionData ? sessionDisplayName(activeSessionData) : (sessionKey.split(':').pop() || sessionKey);
   const sessionAgentId = activeSessionData?.agentId || extractAgentIdFromKey(sessionKey);
@@ -94,6 +95,16 @@ export function Header({ status, sessionKey, onToggleSidebar, activeSessionData,
             title={t('header.export')}
           >
             <Download size={16} />
+          </button>
+        )}
+        {onOpenDashboard && (
+          <button
+            onClick={onOpenDashboard}
+            aria-label="Dashboard"
+            className="p-2 rounded-2xl hover:bg-[var(--pc-hover)] text-pc-text-muted hover:text-pc-text transition-colors"
+            title="Dashboard"
+          >
+            <LayoutDashboard size={16} />
           </button>
         )}
         <button
