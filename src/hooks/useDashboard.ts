@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { NanobotApiClient, type NanobotSession, type NanobotSkill, type NanobotChannelStatus } from '../lib/nanobotApi';
+import { NanobotApiClient, type NanobotSession, type NanobotSkill, type NanobotChannelStatus, type CronJob, type CronJobPayload } from '../lib/nanobotApi';
 
 export interface DashboardData {
   sessions: NanobotSession[];
@@ -9,23 +9,6 @@ export interface DashboardData {
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
-}
-
-export interface CronJob {
-  id: string;
-  name: string;
-  enabled: boolean;
-  delete_after_run: boolean;
-  schedule: {
-    kind: string;
-    expr?: string;
-    tz?: string;
-  };
-  state: {
-    next_run_at?: string;
-    last_run_at?: string;
-    last_status?: string;
-  };
 }
 
 export function useDashboard(apiClient: NanobotApiClient | null) {
@@ -84,7 +67,7 @@ export function useDashboard(apiClient: NanobotApiClient | null) {
   }, [apiClient]);
 
   const toggleSkill = useCallback(async (skillName: string, enabled: boolean) => {
-    if (!apiClient) return;
+    if (!apiClient) return false;
     try {
       await apiClient.setSkillState(skillName, enabled);
       setData(prev => ({
@@ -110,6 +93,37 @@ export function useDashboard(apiClient: NanobotApiClient | null) {
     }
   }, [apiClient, fetchAll]);
 
+  const addCronJob = useCallback(async (payload: CronJobPayload) => {
+    if (!apiClient) return false;
+    try {
+      const res = await apiClient.addCronJob(payload);
+      if (res.applied && res.data.job) {
+        setData(prev => ({
+          ...prev,
+          cronJobs: [...prev.cronJobs, res.data.job!],
+        }));
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [apiClient]);
+
+  const deleteCronJob = useCallback(async (jobId: string) => {
+    if (!apiClient) return false;
+    try {
+      await apiClient.deleteCronJob(jobId);
+      setData(prev => ({
+        ...prev,
+        cronJobs: prev.cronJobs.filter(j => j.id !== jobId),
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiClient]);
+
   useEffect(() => {
     if (apiClient) {
       fetchAll();
@@ -118,5 +132,5 @@ export function useDashboard(apiClient: NanobotApiClient | null) {
     }
   }, [apiClient, fetchAll]);
 
-  return { data, fetchAll, toggleSkill, reloadConfig };
+  return { data, fetchAll, toggleSkill, reloadConfig, addCronJob, deleteCronJob };
 }

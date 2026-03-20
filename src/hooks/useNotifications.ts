@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { playNotificationSound } from '../lib/notificationSound';
 
-const APP_NAME = 'PinchChat';
+const APP_NAME = '伯俊智能舱';
 let baseTitle = APP_NAME;
 
 /** Update the base title (e.g. with active session name). Called by App. */

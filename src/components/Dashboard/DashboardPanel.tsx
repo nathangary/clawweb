@@ -15,7 +15,7 @@ interface Props {
 type Tab = 'overview' | 'skills' | 'channels' | 'cron';
 
 export function DashboardPanel({ apiClient, onClose }: Props) {
-  const { data, fetchAll, toggleSkill, reloadConfig } = useDashboard(apiClient);
+  const { data, fetchAll, toggleSkill, reloadConfig, addCronJob, deleteCronJob } = useDashboard(apiClient);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [reloading, setReloading] = useState(false);
 
@@ -99,7 +99,7 @@ export function DashboardPanel({ apiClient, onClose }: Props) {
                 <ChannelsList channels={data.channels} />
               )}
               {activeTab === 'cron' && (
-                <CronList jobs={data.cronJobs} />
+                <CronList jobs={data.cronJobs} onAdd={addCronJob} onDelete={deleteCronJob} />
               )}
             </>
           )}

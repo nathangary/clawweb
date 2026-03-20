@@ -36,6 +36,39 @@ export interface NanobotChannelStatus {
   last_seen?: string;
 }
 
+export interface CronJobSchedule {
+  kind: 'at' | 'every' | 'cron';
+  at_ms?: number | null;
+  every_ms?: number | null;
+  expr?: string | null;
+  tz?: string | null;
+}
+
+export interface CronJobState {
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_status?: string;
+}
+
+export interface CronJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  delete_after_run: boolean;
+  schedule: CronJobSchedule;
+  state: CronJobState;
+}
+
+export interface CronJobPayload {
+  name: string;
+  schedule: CronJobSchedule;
+  message: string;
+  deliver?: boolean;
+  channel?: string;
+  to?: string;
+  delete_after_run?: boolean;
+}
+
 const isDebug = () => {
   try { return localStorage.getItem('pinchchat:debug') === '1'; } catch { return false; }
 };
@@ -159,27 +192,21 @@ export class NanobotApiClient {
     return this.request('/v1/admin/channels');
   }
 
-  async getCronJobs(): Promise<NanobotApiResponse<{
-    jobs: Array<{
-      id: string;
-      name: string;
-      enabled: boolean;
-      delete_after_run: boolean;
-      schedule: {
-        kind: string;
-        at_ms?: number;
-        every_ms?: number;
-        expr?: string;
-        tz?: string;
-      };
-      state: {
-        next_run_at?: string;
-        last_run_at?: string;
-        last_status?: string;
-      };
-    }>;
-  }>> {
+  async getCronJobs(): Promise<NanobotApiResponse<{ jobs: CronJob[] }>> {
     return this.request('/v1/admin/cron/jobs');
+  }
+
+  async addCronJob(payload: CronJobPayload): Promise<NanobotApiResponse<{ job: CronJob }>> {
+    return this.request('/v1/admin/cron/jobs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCronJob(jobId: string): Promise<NanobotApiResponse<{ job_id: string }>> {
+    return this.request(`/v1/admin/cron/jobs?job_id=${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+    });
   }
 
   healthCheck(): Promise<boolean> {

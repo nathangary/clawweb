@@ -106,7 +106,17 @@ export function useGateway() {
               }
               return [...prev.slice(0, -1), updated];
             }
-            return prev;
+            const msg: ChatMessage = {
+              id: event.eventId,
+              role: 'assistant',
+              content: '',
+              timestamp: Date.now(),
+              blocks: [{ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId }],
+              isStreaming: true,
+              runId: event.eventId,
+              streamStartedAt: Date.now(),
+            };
+            return [...prev, msg];
           });
         }
       }

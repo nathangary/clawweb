@@ -28,38 +28,38 @@ function VersionBadge() {
     );
   }
   return (
-    <span className="ml-1 text-[9px] text-pc-text-faint select-all" title={`PinchChat v${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
+    <span className="ml-1 text-[9px] text-pc-text-faint select-all" title={`伯俊智能舱 v${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
   );
 }
 
 function SidebarFooter() {
-  const pwa = usePwaInstall();
-  return (
-    <div className="px-4 py-3 border-t border-pc-border flex items-center justify-center gap-3">
-      {pwa.canInstall && (
-        <button
-          onClick={pwa.install}
-          className="inline-flex items-center gap-1 text-[10px] text-pc-accent-light hover:text-[var(--pc-accent)] transition-colors"
-          title="Install app"
-          aria-label="Install app"
-        >
-          <Download size={11} />
-          <span>Install</span>
-        </button>
-      )}
-      <a
-        href="https://github.com/MarlBurroW/pinchchat"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-pc-text-faint hover:text-pc-text-secondary transition-colors"
-        title="GitHub"
-        aria-label="GitHub repository"
-      >
-        <Globe size={11} />
-      </a>
-      <VersionBadge />
-    </div>
-  );
+  // const pwa = usePwaInstall();
+  // return (
+  //   <div className="px-4 py-3 border-t border-pc-border flex items-center justify-center gap-3">
+  //     {pwa.canInstall && (
+  //       <button
+  //         onClick={pwa.install}
+  //         className="inline-flex items-center gap-1 text-[10px] text-pc-accent-light hover:text-[var(--pc-accent)] transition-colors"
+  //         title="Install app"
+  //         aria-label="Install app"
+  //       >
+  //         <Download size={11} />
+  //         <span>Install</span>
+  //       </button>
+  //     )}
+  //     <a
+  //       href="https://github.com/MarlBurroW/pinchchat"
+  //       target="_blank"
+  //       rel="noopener noreferrer"
+  //       className="text-pc-text-faint hover:text-pc-text-secondary transition-colors"
+  //       title="GitHub"
+  //       aria-label="GitHub repository"
+  //     >
+  //       <Globe size={11} />
+  //     </a>
+  //     <VersionBadge />
+  //   </div>
+  // );
 }
 
 const PINNED_KEY = 'pinchchat-pinned-sessions';
@@ -458,7 +458,7 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
             <div className="relative shrink-0">
               <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-r from-cyan-400/15 to-violet-500/15 blur-lg" />
               <div className="relative flex h-8 w-8 items-center justify-center rounded-xl overflow-hidden">
-                <img src="/logo.png" alt="PinchChat" className="h-8 w-8 object-contain" />
+                <img src="/logo.png" alt="伯俊智能舱" className="h-8 w-8 object-contain" />
               </div>
             </div>
             <span className="font-semibold text-sm text-pc-text tracking-wide truncate">{t('sidebar.title')}</span>
