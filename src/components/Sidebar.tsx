@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil } from 'lucide-react';
+import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil, FileText } from 'lucide-react';
 import type { Session } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SessionIcon } from './SessionIcon';
@@ -248,9 +248,11 @@ interface Props {
   onNewSessionForAgent?: (agentId: string) => Promise<void>;
   onOpenDashboard?: () => void;
   onOpenSkillHub?: () => void;
+  onOpenAgentOrchestrator?: () => void;
+  onOpenHistoryFiles?: () => void;
 }
 
-export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub }: Props) {
+export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub, onOpenAgentOrchestrator, onOpenHistoryFiles }: Props) {
   const t = useT();
   const [filter, setFilter] = useState('');
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -584,7 +586,7 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
           </div>
         )}
 
-        {(onOpenDashboard || onOpenSkillHub) && (
+        {(onOpenDashboard || onOpenSkillHub || onOpenAgentOrchestrator) && (
           <div className="px-2 py-2 flex flex-col gap-1 border-b border-pc-border">
             {onOpenDashboard && (
               <button
@@ -602,6 +604,24 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
               >
                 <Wand2 size={16} />
                 <span className="font-medium">技能市场</span>
+              </button>
+            )}
+            {onOpenAgentOrchestrator && (
+              <button
+                onClick={onOpenAgentOrchestrator}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <Bot size={16} />
+                <span className="font-medium">智能体编排</span>
+              </button>
+            )}
+            {onOpenHistoryFiles && (
+              <button
+                onClick={onOpenHistoryFiles}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <FileText size={16} />
+                <span className="font-medium">历史文件</span>
               </button>
             )}
           </div>

@@ -10,6 +10,8 @@ import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ToolCollapseProvider } from './contexts/ToolCollapseContext';
 import { DashboardPanel } from './components/Dashboard/DashboardPanel';
 import { SkillHubPage } from './components/SkillHub/SkillHubPage';
+import { AgentOrchestratorPage } from './components/AgentOrchestrator/AgentOrchestratorPage';
+import { HistoryFilesPage } from './components/HistoryFiles/HistoryFilesPage';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from './lib/sessionName';
 import { X } from 'lucide-react';
 import { useT } from './hooks/useLocale';
@@ -40,6 +42,8 @@ export default function App() {
   const [splitDragging, setSplitDragging] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [skillHubOpen, setSkillHubOpen] = useState(false);
+  const [agentOrchestratorOpen, setAgentOrchestratorOpen] = useState(false);
+  const [historyFilesOpen, setHistoryFilesOpen] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
   const secondary = useSecondarySession(getClient, splitSession);
@@ -161,6 +165,8 @@ export default function App() {
         onNewSessionForAgent={() => Promise.resolve()}
         onOpenDashboard={() => setDashboardOpen(true)}
         onOpenSkillHub={() => setSkillHubOpen(true)}
+        onOpenAgentOrchestrator={() => setAgentOrchestratorOpen(true)}
+        onOpenHistoryFiles={() => setHistoryFilesOpen(true)}
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
@@ -210,6 +216,12 @@ export default function App() {
     </ToolCollapseProvider>
     {skillHubOpen && (
       <SkillHubPage onClose={() => setSkillHubOpen(false)} />
+    )}
+    {agentOrchestratorOpen && (
+      <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} />
+    )}
+    {historyFilesOpen && (
+      <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} />
     )}
     </>
   );

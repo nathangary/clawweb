@@ -147,8 +147,8 @@ export class NanobotGatewayClient {
     if (attachments && attachments.length > 0) {
       msg.attachments = attachments.map(a => ({
         type: a.mimeType,
-        url: a.content,
-        localPath: a.fileName,
+        url: '',
+        localPath: a.content,
       }));
     }
 

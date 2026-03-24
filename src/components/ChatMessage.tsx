@@ -2,6 +2,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { LazyMarkdown } from './LazyMarkdown';
+import { HtmlPreview, extractHtmlPath } from './HtmlPreview';
 import type { ChatMessage as ChatMessageType, MessageBlock } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -537,10 +538,12 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
             )
           )}
 
-          {/* Inline images */}
           {renderImageBlocks(message.blocks)}
 
-          {/* Streaming indicator */}
+          {extractHtmlPath(message.content || '') && (
+            <HtmlPreview filePath={extractHtmlPath(message.content || '') as string} />
+          )}
+
           {message.isStreaming && (() => {
             const hasVisibleContent = message.content?.trim();
             if (!hasVisibleContent) {

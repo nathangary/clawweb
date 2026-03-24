@@ -198,13 +198,26 @@ export function useGateway() {
     try {
       const res = await apiClientRef.current.getSessionHistory(sessionKey, 1, 100, 'asc');
       if (res.applied && res.data.messages) {
-        const msgs: ChatMessage[] = res.data.messages.map((m, i) => ({
-          id: `${sessionKey}-${i}`,
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          timestamp: new Date(m.timestamp).getTime(),
-          blocks: [{ type: 'text' as const, text: m.content }],
-        }));
+        const baseUrl = apiClientRef.current.getBaseUrl().replace('/api', '');
+        const msgs: ChatMessage[] = res.data.messages.map((m, i) => {
+          const blocks: MessageBlock[] = [];
+          if (m.media) {
+            for (const path of m.media) {
+              const match = path.match(/workspace[/\\](.+)$/);
+              const relativePath = match ? match[1] : path;
+              const url = `${baseUrl}/api/v1/files/${encodeURIComponent(relativePath)}`;
+              blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url });
+            }
+          }
+          blocks.push({ type: 'text' as const, text: m.content });
+          return {
+            id: `${sessionKey}-${i}`,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: new Date(m.timestamp).getTime(),
+            blocks,
+          };
+        });
         setMessages(msgs);
       }
     } catch {

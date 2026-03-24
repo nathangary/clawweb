@@ -17,6 +17,7 @@ export interface NanobotMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  media?: string[];
 }
 
 export interface NanobotHistoryItem {
@@ -86,6 +87,10 @@ export class NanobotApiClient {
   setCredentials(baseUrl: string, token?: string) {
     this.baseUrl = baseUrl;
     if (token !== undefined) this.token = token;
+  }
+
+  getBaseUrl() {
+    return this.baseUrl;
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<NanobotApiResponse<T>> {
