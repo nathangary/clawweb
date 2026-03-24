@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Download, Pencil, Plus, ChevronDown } from 'lucide-react';
+import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil } from 'lucide-react';
 import type { Session } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SessionIcon } from './SessionIcon';
@@ -246,9 +246,11 @@ interface Props {
   onRename?: (key: string, label: string) => Promise<boolean>;
   onNewSession?: () => Promise<void>;
   onNewSessionForAgent?: (agentId: string) => Promise<void>;
+  onOpenDashboard?: () => void;
+  onOpenSkillHub?: () => void;
 }
 
-export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent }: Props) {
+export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub }: Props) {
   const t = useT();
   const [filter, setFilter] = useState('');
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -578,6 +580,29 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
                   </button>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {(onOpenDashboard || onOpenSkillHub) && (
+          <div className="px-2 py-2 flex flex-col gap-1 border-b border-pc-border">
+            {onOpenDashboard && (
+              <button
+                onClick={onOpenDashboard}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <LayoutDashboard size={16} />
+                <span className="font-medium">Dashboard</span>
+              </button>
+            )}
+            {onOpenSkillHub && (
+              <button
+                onClick={onOpenSkillHub}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <Wand2 size={16} />
+                <span className="font-medium">技能市场</span>
+              </button>
             )}
           </div>
         )}
