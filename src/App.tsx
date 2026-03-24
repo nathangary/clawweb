@@ -9,6 +9,7 @@ import { ConnectionBanner } from './components/ConnectionBanner';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ToolCollapseProvider } from './contexts/ToolCollapseContext';
 import { DashboardPanel } from './components/Dashboard/DashboardPanel';
+import { SkillHubPage } from './components/SkillHub/SkillHubPage';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from './lib/sessionName';
 import { X } from 'lucide-react';
 import { useT } from './hooks/useLocale';
@@ -38,6 +39,7 @@ export default function App() {
   const [splitRatio, setSplitRatio] = useState(getSavedSplitRatio);
   const [splitDragging, setSplitDragging] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [skillHubOpen, setSkillHubOpen] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
   const secondary = useSecondarySession(getClient, splitSession);
@@ -99,6 +101,9 @@ export default function App() {
     if (e.key === 'Escape' && dashboardOpen) {
       setDashboardOpen(false);
     }
+    if (e.key === 'Escape' && skillHubOpen) {
+      setSkillHubOpen(false);
+    }
     if (e.key === '?' && !shortcutsOpen) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
@@ -115,7 +120,7 @@ export default function App() {
         : (idx + 1) % sessions.length;
       switchSession(sessions[next].key);
     }
-  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen]);
+  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen, skillHubOpen]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -138,6 +143,7 @@ export default function App() {
   }
 
   return (
+    <>
     <ToolCollapseProvider>
     <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="伯俊智能舱">
       <a href="#chat-input" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-pc-accent focus:text-white focus:text-sm focus:font-medium">{t('app.skipToChat')}</a>
@@ -156,7 +162,7 @@ export default function App() {
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
-          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={undefined} agentName={agentName} onCompact={() => Promise.resolve(false)} onOpenDashboard={() => setDashboardOpen(true)} />
+          <Header status={status} sessionKey={activeSession} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} activeSessionData={sessions.find(s => s.key === activeSession)} onLogout={logout} soundEnabled={soundEnabled} onToggleSound={toggleSound} messages={messages} agentAvatarUrl={undefined} agentName={agentName} onCompact={() => Promise.resolve(false)} onOpenDashboard={() => setDashboardOpen(true)} onOpenSkillHub={() => setSkillHubOpen(true)} />
           <ConnectionBanner status={status} />
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-pc-text-muted"><div className="animate-pulse text-sm">Loading…</div></div>}>
             <Chat messages={messages} isGenerating={isGenerating} isLoadingHistory={isLoadingHistory} status={status} sessionKey={activeSession} onSend={sendMessage} onNewSession={createNewSession} onAbort={abort} agentAvatarUrl={undefined} agentName={agentName} />
@@ -200,5 +206,9 @@ export default function App() {
       )}
     </div>
     </ToolCollapseProvider>
+    {skillHubOpen && (
+      <SkillHubPage onClose={() => setSkillHubOpen(false)} />
+    )}
+    </>
   );
 }

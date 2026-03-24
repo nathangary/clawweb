@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef, useEffect, forwardRef } from 'react';
-import { Menu, Sparkles, LogOut, Cpu, Bot, Download, Minimize2, Info, Copy, Check, Settings, LayoutDashboard } from 'lucide-react';
+import { Menu, Sparkles, LogOut, Cpu, Bot, Download, Minimize2, Info, Copy, Check, Settings, LayoutDashboard, Wand2 } from 'lucide-react';
 import type { ConnectionStatus, Session, ChatMessage } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SettingsModal } from './SettingsModal';
@@ -20,9 +20,10 @@ interface Props {
   agentName?: string;
   onCompact?: (sessionKey: string) => Promise<boolean>;
   onOpenDashboard?: () => void;
+  onOpenSkillHub?: () => void;
 }
 
-export function Header({ status, sessionKey, onToggleSidebar, activeSessionData, onLogout, soundEnabled, onToggleSound, messages, agentAvatarUrl, agentName, onCompact, onOpenDashboard }: Props) {
+export function Header({ status, sessionKey, onToggleSidebar, activeSessionData, onLogout, soundEnabled, onToggleSound, messages, agentAvatarUrl, agentName, onCompact, onOpenDashboard, onOpenSkillHub }: Props) {
   const t = useT();
   const sessionLabel = activeSessionData ? sessionDisplayName(activeSessionData) : (sessionKey.split(':').pop() || sessionKey);
   const sessionAgentId = activeSessionData?.agentId || extractAgentIdFromKey(sessionKey);
@@ -64,7 +65,7 @@ export function Header({ status, sessionKey, onToggleSidebar, activeSessionData,
         <Menu size={20} />
       </button>
       <div className="flex items-center gap-3 flex-1 min-w-0 relative" ref={sessionInfoRef}>
-        <img src={agentAvatarUrl || '/logo.png'} alt="伯俊智能舱" className="h-9 w-9 rounded-2xl object-cover" onError={(e) => { const img = e.target as HTMLImageElement; if (img.src !== window.location.origin + '/logo.png') { img.src = '/logo.png'; } else { img.style.display = 'none'; } }} />
+        <img src={agentAvatarUrl || '/logo.png'} alt="伯俊智能舱" className="h-12 w-12 rounded-2xl object-cover" onError={(e) => { const img = e.target as HTMLImageElement; if (img.src !== window.location.origin + '/logo.png') { img.src = '/logo.png'; } else { img.style.display = 'none'; } }} />
         <button className="min-w-0 text-left group" onClick={() => setShowSessionInfo(v => !v)} title={t('header.sessionInfo')} aria-label={t('header.sessionInfo')}>
           <div className="flex items-center gap-2">
             <span className="font-semibold text-pc-text text-sm tracking-wide">{headerAgentName}</span>
@@ -87,7 +88,7 @@ export function Header({ status, sessionKey, onToggleSidebar, activeSessionData,
         )}
       </div>
       <div className="flex items-center gap-2 text-sm">
-        {messages && messages.length > 0 && (
+        {/* {messages && messages.length > 0 && (
           <button
             onClick={handleExport}
             aria-label={t('header.export')}
@@ -95,6 +96,16 @@ export function Header({ status, sessionKey, onToggleSidebar, activeSessionData,
             title={t('header.export')}
           >
             <Download size={16} />
+          </button>
+        )} */}
+        {onOpenSkillHub && (
+          <button
+            onClick={onOpenSkillHub}
+            aria-label="技能市场"
+            className="p-2 rounded-2xl hover:bg-[var(--pc-hover)] text-pc-text-muted hover:text-pc-text transition-colors"
+            title="技能市场"
+          >
+            <Wand2 size={16} />
           </button>
         )}
         {onOpenDashboard && (
