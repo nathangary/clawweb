@@ -157,6 +157,35 @@ export class NanobotGatewayClient {
     log('Sent message:', msg);
   }
 
+  sendToSession(sessionKey: string, message: string) {
+    const msg: Record<string, unknown> = {
+      messageId: genId('msg'),
+      channel: 'transport',
+      chatId: this.chatId,
+      senderId: this.clientId,
+      content: message,
+      sessionKey,
+      ts: new Date().toISOString(),
+    };
+
+    if (this.authToken) {
+      msg.token = this.authToken;
+    }
+
+    this.sendRaw(msg);
+    log('Sent to session:', sessionKey, msg);
+  }
+
+  bindToSession(sessionKey: string, chatId?: string) {
+    const targetChatId = chatId || this.chatId;
+    this.sendRaw({
+      type: 'bind',
+      session_key: sessionKey,
+      chat_id: targetChatId,
+    });
+    log('Bound to session:', sessionKey);
+  }
+
   private sendRaw(data: Record<string, unknown>) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       log('Not connected, cannot send');

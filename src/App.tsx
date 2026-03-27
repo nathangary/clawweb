@@ -218,7 +218,7 @@ export default function App() {
       <SkillHubPage onClose={() => setSkillHubOpen(false)} />
     )}
     {agentOrchestratorOpen && (
-      <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} />
+      <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} getClient={getClient} />
     )}
     {historyFilesOpen && (
       <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} />
