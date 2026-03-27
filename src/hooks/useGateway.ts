@@ -130,11 +130,36 @@ export function useGateway() {
       }
       currentEventIdRef.current = null;
       setIsGenerating(false);
-      if (event.content) {
+
+      const processMedia = (media?: string[]): MessageBlock[] => {
+        if (!media || !Array.isArray(media)) return [];
+        const blocks: MessageBlock[] = [];
+        for (const path of media) {
+          if (path.startsWith('data:')) {
+            const match = path.match(/^data:([^;]+);base64,(.+)$/);
+            if (match) {
+              blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
+            }
+          } else if (path.startsWith('http')) {
+            blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: path });
+          }
+        }
+        return blocks;
+      };
+
+      const newImageBlocks = processMedia(event.media);
+
+      if (event.content || newImageBlocks.length > 0) {
         setMessages(prev => {
           const last = prev[prev.length - 1];
           if (last && last.role === 'assistant' && last.isStreaming) {
-            return [...prev.slice(0, -1), { ...last, isStreaming: false, content: event.content }];
+            const mergedBlocks = [...last.blocks, ...newImageBlocks];
+            return [...prev.slice(0, -1), { 
+              ...last, 
+              isStreaming: false, 
+              content: event.content,
+              blocks: mergedBlocks.length > 0 ? mergedBlocks : last.blocks
+            }];
           }
           return prev;
         });
@@ -201,12 +226,21 @@ export function useGateway() {
         const baseUrl = apiClientRef.current.getBaseUrl().replace('/api', '');
         const msgs: ChatMessage[] = res.data.messages.map((m, i) => {
           const blocks: MessageBlock[] = [];
-          if (m.media) {
+          if (m.media && Array.isArray(m.media)) {
             for (const path of m.media) {
-              const match = path.match(/workspace[/\\](.+)$/);
-              const relativePath = match ? match[1] : path;
-              const url = `${baseUrl}/api/v1/files/${encodeURIComponent(relativePath)}`;
-              blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url });
+              if (path.startsWith('data:')) {
+                const match = path.match(/^data:([^;]+);base64,(.+)$/);
+                if (match) {
+                  blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
+                }
+              } else if (path.startsWith('http')) {
+                blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: path });
+              } else {
+                const match = path.match(/workspace[/\\](.+)$/);
+                const relativePath = match ? match[1] : path;
+                const url = `${baseUrl}/api/v1/files/${encodeURIComponent(relativePath)}`;
+                blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url });
+              }
             }
           }
           blocks.push({ type: 'text' as const, text: m.content });

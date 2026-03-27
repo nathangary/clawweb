@@ -26,6 +26,7 @@ export interface NanobotOutboundEvent {
   chatId: string;
   sessionKey: string;
   content: string;
+  media?: string[];
   metadata?: Record<string, unknown>;
   done: boolean;
   ts: string;
@@ -145,11 +146,7 @@ export class NanobotGatewayClient {
     };
 
     if (attachments && attachments.length > 0) {
-      msg.attachments = attachments.map(a => ({
-        type: a.mimeType,
-        url: '',
-        localPath: a.content,
-      }));
+      msg.media = attachments.map(a => `data:${a.mimeType};base64,${a.content}`);
     }
 
     if (this.authToken) {

@@ -25,7 +25,6 @@ const DOC_FILES = [
   { name: 'TODO-CronJob-API.md', sessionName: '定时任务 API 开发' },
   { name: '智能体群管理平台 PRD.md', sessionName: '智能体编排 PRD' },
   { name: '历史文件查看器 PRD.md', sessionName: '历史文件 PRD' },
-  { name: 'bar-chart.html', sessionName: 'ECharts 图表演示' },
 ];
 
 export function HistoryFilesPage({ onClose }: Props) {
