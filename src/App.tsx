@@ -8,7 +8,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ToolCollapseProvider } from './contexts/ToolCollapseContext';
-import { DashboardPanel } from './components/Dashboard/DashboardPanel';
+import { DashboardPage } from './components/Dashboard/DashboardPage';
 import { SkillHubPage } from './components/SkillHub/SkillHubPage';
 import { AgentOrchestratorPage } from './components/AgentOrchestrator/AgentOrchestratorPage';
 import { HistoryFilesPage } from './components/HistoryFiles/HistoryFilesPage';
@@ -207,7 +207,7 @@ export default function App() {
       </div>
       <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {dashboardOpen && (
-        <DashboardPanel
+        <DashboardPage
           apiClient={getApiClient()}
           onClose={() => setDashboardOpen(false)}
         />

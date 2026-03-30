@@ -70,6 +70,23 @@ export interface CronJobPayload {
   delete_after_run?: boolean;
 }
 
+export interface CronLogEntry {
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp: string;
+  name?: string;
+  tool_calls?: Array<{
+    name: string;
+    input: Record<string, unknown>;
+  }>;
+  metadata?: {
+    request_id?: string;
+    subagent_task_id?: string;
+    subagent_label?: string;
+    subagent_status?: string;
+  };
+}
+
 const isDebug = () => {
   try { return localStorage.getItem('pinchchat:debug') === '1'; } catch { return false; }
 };
@@ -212,6 +229,13 @@ export class NanobotApiClient {
     return this.request(`/v1/admin/cron/jobs?job_id=${encodeURIComponent(jobId)}`, {
       method: 'DELETE',
     });
+  }
+
+  async getCronJobLogs(jobId: string, limit = 50): Promise<NanobotApiResponse<{
+    job_id: string;
+    logs: CronLogEntry[];
+  }>> {
+    return this.request(`/v1/admin/cron/jobs/logs?job_id=${encodeURIComponent(jobId)}&limit=${limit}`);
   }
 
   healthCheck(): Promise<boolean> {

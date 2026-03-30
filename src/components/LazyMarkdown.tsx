@@ -12,11 +12,13 @@ let _pluginsReady = false;
 const pluginsPromise = Promise.all([
   import('remark-gfm').then(m => m.default),
   import('remark-breaks').then(m => m.default),
+  import('remark-toc').then(m => m.default),
+  import('rehype-slug').then(m => m.default),
   import('rehype-highlight').then(m => m.default),
   import('../lib/highlight').then(m => m.rehypeHighlightOptions),
-]).then(([remarkGfm, remarkBreaks, rehypeHighlight, rehypeHighlightOptions]) => {
-  _remarkPlugins = [remarkGfm, remarkBreaks];
-  _rehypePlugins = [[rehypeHighlight, rehypeHighlightOptions]];
+]).then(([remarkGfm, remarkBreaks, remarkToc, rehypeSlug, rehypeHighlight, rehypeHighlightOptions]) => {
+  _remarkPlugins = [remarkGfm, remarkBreaks, [remarkToc, { heading: 'table of contents' }]];
+  _rehypePlugins = [rehypeSlug, [rehypeHighlight, rehypeHighlightOptions]];
   _pluginsReady = true;
 });
 

@@ -27,12 +27,38 @@ const DOC_FILES = [
   { name: '历史文件查看器 PRD.md', sessionName: '历史文件 PRD' },
 ];
 
+interface Header {
+  level: number;
+  text: string;
+  id: string;
+}
+
+function parseHeaders(content: string): Header[] {
+  const headers: Header[] = [];
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const match = line.match(/^(#{1,6})\s+(.*)/);
+    if (match) {
+      const level = match[1].length;
+      const text = match[2].trim();
+      const id = text.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+      headers.push({ level, text, id });
+    }
+  }
+  return headers;
+}
+
 export function HistoryFilesPage({ onClose }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'markdown' | 'other'>('all');
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
   const [files, setFiles] = useState<GeneratedFile[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const headers = useMemo(() => {
+    if (selectedFile?.type !== 'markdown') return [];
+    return parseHeaders(selectedFile.content);
+  }, [selectedFile]);
 
   useEffect(() => {
     const loadFiles = async () => {
@@ -255,18 +281,46 @@ export function HistoryFilesPage({ onClose }: Props) {
               </button>
             </div>
           </div>
-          <div className={`flex-1 ${selectedFile.type === 'html' ? 'overflow-hidden' : 'overflow-y-auto'} p-4`}>
-            {selectedFile.type === 'markdown' ? (
-              <div className="prose prose-invert prose-sm max-w-none">
-                <LazyMarkdown children={selectedFile.content} />
+
+          <div className="flex-1 flex overflow-hidden">
+            {selectedFile.type === 'markdown' && headers.length > 0 && (
+              <div className="w-48 shrink-0 overflow-y-auto border-r border-pc-border p-4 space-y-2">
+                <h3 className="text-xs font-semibold text-pc-text-muted mb-3 uppercase tracking-wider">目录</h3>
+                {headers.map((h, i) => (
+                  <a
+                    key={i}
+                    href={`#${h.id}`}
+                    className="block text-xs text-pc-text-secondary hover:text-pc-accent truncate"
+                    style={{ paddingLeft: `${(h.level - 1) * 12}px` }}
+                  >
+                    {h.text}
+                  </a>
+                ))}
               </div>
-            ) : selectedFile.type === 'html' ? (
-              <HtmlPreview filePath={selectedFile.name} fullHeight={true} />
-            ) : (
-              <pre className="text-xs text-pc-text-muted whitespace-pre-wrap font-mono bg-[var(--pc-bg-base)] p-4 rounded-xl border border-pc-border">
-                {selectedFile.content}
-              </pre>
             )}
+            
+            <div className={`flex-1 ${selectedFile.type === 'html' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+              {selectedFile.type === 'markdown' ? (
+                <div className="h-full w-full p-4 overflow-y-auto">
+                <article className="prose prose-sm dark:prose-invert max-w-none">
+                  <LazyMarkdown components={{
+                    h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    h3: ({ node, ...props }) => <h3 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    h4: ({ node, ...props }) => <h4 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    h5: ({ node, ...props }) => <h5 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    h6: ({ node, ...props }) => <h6 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                  }}>{selectedFile.content}</LazyMarkdown>
+                </article>
+                </div>
+              ) : selectedFile.type === 'html' ? (
+                <HtmlPreview filePath={selectedFile.name} fullHeight={true} />
+              ) : (
+                <pre className="text-xs text-pc-text-muted whitespace-pre-wrap font-mono bg-[var(--pc-bg-base)] p-4 rounded-xl border border-pc-border">
+                  {selectedFile.content}
+                </pre>
+              )}
+            </div>
           </div>
         </div>
       )}

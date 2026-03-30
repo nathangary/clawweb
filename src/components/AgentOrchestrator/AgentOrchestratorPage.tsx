@@ -11,8 +11,8 @@ interface GenerationMessage {
   input?: Record<string, unknown>;
 }
 
-const RULE_SYSTEM_PROMPT = `你是一个智能流程编排助手。当用户描述一个需求时，你需要：
-1. 分析用户需求，设计合理的执行流程（顺序、分支、循环）
+const RULE_SYSTEM_PROMPT = `帮我生成一个场景，当我描述一个需求时，你需要：
+1. 分析我的需求，设计合理的执行流程（顺序、分支、循环）
 2. 确定需要使用的技能（可以是已有的，也可以是新的）
 3. 生成流程图结构（nodes + edges）
 4. 生成系统提示词（用于后续智能体对话）
@@ -86,7 +86,7 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
 
     setIsGenerating(true);
     setGenMessages([]);
-    const fullMessage = `${RULE_SYSTEM_PROMPT}\n\n用户需求：${description}`;
+    const fullMessage = `${RULE_SYSTEM_PROMPT}\n\n需求如下：${description}`;
     client.send(fullMessage);
 
     let handled = false;
