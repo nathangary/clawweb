@@ -1,74 +1,126 @@
-const RULES_STORAGE_KEY = 'pinchchat_rules';
+import type { NanobotApiClient } from './nanobotApi';
+import type { Rule, RulePayload } from './nanobotApi';
 
-export interface SkillRef {
-  skillId: string;
-  name: string;
-  params: Record<string, unknown>;
+export type { Rule, RulePayload };
+export type { RuleSkillRef as SkillRef, RuleFlowNode as FlowNode, RuleFlowEdge as FlowEdge, RuleFlowGraph as FlowGraph } from './nanobotApi';
+
+let apiClient: NanobotApiClient | null = null;
+let rulesCache: Rule[] | null = null;
+let pendingRefresh: Promise<Rule[]> | null = null;
+
+export function setRulesApiClient(client: NanobotApiClient | null) {
+  apiClient = client;
+  rulesCache = null;
+  pendingRefresh = null;
 }
 
-export interface FlowNode {
-  id: string;
-  type: 'skill' | 'condition' | 'loop' | 'start' | 'end';
-  skillId?: string;
-  skillName?: string;
-  label: string;
-  condition?: string;
-  loopConfig?: { maxIterations: number; condition: string };
+export function invalidateRulesCache() {
+  rulesCache = null;
+  pendingRefresh = null;
 }
 
-export interface FlowEdge {
-  id: string;
-  source: string;
-  target: string;
-  label?: string;
+async function ensureApiClient(): Promise<NanobotApiClient> {
+  if (!apiClient) {
+    throw new Error('Rules API client not initialized. Call setRulesApiClient() first.');
+  }
+  return apiClient;
 }
 
-export interface FlowGraph {
-  nodes: FlowNode[];
-  edges: FlowEdge[];
+export async function loadRules(): Promise<Rule[]> {
+  if (rulesCache !== null) return rulesCache;
+  if (pendingRefresh) return pendingRefresh;
+
+  pendingRefresh = (async () => {
+    try {
+      const client = await ensureApiClient();
+      const res = await client.getRules();
+      rulesCache = res.applied && res.data.rules ? res.data.rules : [];
+      return rulesCache;
+    } catch (err) {
+      console.error('Failed to load rules from API:', err);
+      rulesCache = [];
+      return [];
+    } finally {
+      pendingRefresh = null;
+    }
+  })();
+
+  return pendingRefresh;
 }
 
-export interface Rule {
-  id: string;
-  name: string;
-  description: string;
-  status: 'active' | 'draft' | 'disabled';
-  triggerType: 'manual' | 'cron' | 'webhook';
-  triggerConfig?: string;
-  runCount: number;
-  successRate: number;
-  lastRunAt?: string;
-  createdAt: string;
-  skills: SkillRef[];
-  flow: FlowGraph;
-  flowType: 'graph' | 'list';
-  systemPrompt: string;
-}
-
-export function getStoredRules(): Rule[] {
+export async function saveRule(rule: Rule): Promise<Rule | null> {
   try {
-    const raw = localStorage.getItem(RULES_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
+    const client = await ensureApiClient();
+    const exists = rulesCache?.find(r => r.id === rule.id);
+
+    let res;
+    if (exists) {
+      const payload: Partial<RulePayload> = {
+        name: rule.name,
+        description: rule.description,
+        status: rule.status,
+        triggerType: rule.triggerType,
+        triggerConfig: rule.triggerConfig,
+        skills: rule.skills,
+        flow: rule.flow,
+        flowType: rule.flowType,
+        systemPrompt: rule.systemPrompt,
+      };
+      res = await client.updateRule(rule.id, payload);
+    } else {
+      const payload: RulePayload = {
+        name: rule.name,
+        description: rule.description,
+        status: rule.status,
+        triggerType: rule.triggerType,
+        triggerConfig: rule.triggerConfig,
+        skills: rule.skills,
+        flow: rule.flow,
+        flowType: rule.flowType,
+        systemPrompt: rule.systemPrompt,
+      };
+      res = await client.createRule(payload);
+    }
+
+    if (res.applied && res.data.rule) {
+      rulesCache = null;
+      return res.data.rule;
+    }
+    return null;
+  } catch (err) {
+    console.error('Failed to save rule:', err);
+    return null;
   }
 }
 
-export function saveRule(rule: Rule) {
-  const rules = getStoredRules();
-  const existingIndex = rules.findIndex(r => r.id === rule.id);
-  if (existingIndex >= 0) {
-    rules[existingIndex] = rule;
-  } else {
-    rules.push(rule);
+export async function deleteRule(ruleId: string): Promise<boolean> {
+  try {
+    const client = await ensureApiClient();
+    const res = await client.deleteRule(ruleId);
+    if (res.applied) {
+      rulesCache = null;
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Failed to delete rule:', err);
+    return false;
   }
-  localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(rules));
 }
 
-export function deleteRule(ruleId: string) {
-  const rules = getStoredRules().filter(r => r.id !== ruleId);
-  localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(rules));
+export async function updateRuleStatus(ruleId: string, status: Rule['status']): Promise<Rule | null> {
+  try {
+    const client = await ensureApiClient();
+    const res = await client.updateRule(ruleId, { status });
+    if (res.applied && res.data.rule) {
+      rulesCache = null;
+      return res.data.rule;
+    }
+    return null;
+  } catch (err) {
+    console.error('Failed to update rule status:', err);
+    return null;
+  }
 }
 
 export function generateRuleId(): string {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { NanobotApiClient, type NanobotSession, type NanobotSkill, type NanobotChannelStatus, type CronJob, type CronJobPayload, type CronLogEntry } from '../lib/nanobotApi';
+import { NanobotApiClient, type NanobotSession, type NanobotSkill, type NanobotChannelStatus, type CronJob, type CronJobPayload, type CronLogEntry, type HealthReport } from '../lib/nanobotApi';
 
 export interface DashboardData {
   sessions: NanobotSession[];
@@ -7,6 +7,7 @@ export interface DashboardData {
   channels: Record<string, NanobotChannelStatus>;
   cronJobs: CronJob[];
   cronLogs: Record<string, CronLogEntry[]>;
+  health: HealthReport | null;
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
@@ -19,12 +20,30 @@ export function useDashboardPage(apiClient: NanobotApiClient | null) {
     channels: {},
     cronJobs: [],
     cronLogs: {},
+    health: null,
     loading: false,
     error: null,
     lastUpdated: null,
   });
 
   const loadingRef = useRef(false);
+
+  const fetchHealth = useCallback(async () => {
+    if (!apiClient) return;
+    try {
+      const health = await apiClient.healthCheck();
+      setData(prev => ({ ...prev, health }));
+    } catch {
+      setData(prev => ({
+        ...prev,
+        health: {
+          overall: 'unhealthy',
+          services: [],
+          checkedAt: new Date().toISOString(),
+        },
+      }));
+    }
+  }, [apiClient]);
 
   const fetchAll = useCallback(async () => {
     if (!apiClient || loadingRef.current) return;
@@ -54,6 +73,7 @@ export function useDashboardPage(apiClient: NanobotApiClient | null) {
         channels,
         cronJobs,
         cronLogs: data.cronLogs,
+        health: data.health,
         loading: false,
         error: null,
         lastUpdated: new Date(),
@@ -148,10 +168,11 @@ export function useDashboardPage(apiClient: NanobotApiClient | null) {
   useEffect(() => {
     if (apiClient) {
       fetchAll();
-      const interval = setInterval(fetchAll, 30000);
+      fetchHealth();
+      const interval = setInterval(() => { fetchAll(); fetchHealth(); }, 30000);
       return () => clearInterval(interval);
     }
-  }, [apiClient, fetchAll]);
+  }, [apiClient, fetchAll, fetchHealth]);
 
-  return { data, fetchAll, fetchCronLogs, toggleSkill, reloadConfig, addCronJob, deleteCronJob };
+  return { data, fetchAll, fetchHealth, fetchCronLogs, toggleSkill, reloadConfig, addCronJob, deleteCronJob };
 }

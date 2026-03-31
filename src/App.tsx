@@ -6,6 +6,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { LoginScreen } from './components/LoginScreen';
 import { ConnectionBanner } from './components/ConnectionBanner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ToolCollapseProvider } from './contexts/ToolCollapseContext';
 import { DashboardPage } from './components/Dashboard/DashboardPage';
@@ -206,22 +207,30 @@ export default function App() {
         )}
       </div>
       <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      {dashboardOpen && (
+    {dashboardOpen && (
+      <ErrorBoundary>
         <DashboardPage
           apiClient={getApiClient()}
           onClose={() => setDashboardOpen(false)}
         />
-      )}
+      </ErrorBoundary>
+    )}
     </div>
     </ToolCollapseProvider>
     {skillHubOpen && (
-      <SkillHubPage onClose={() => setSkillHubOpen(false)} />
+      <ErrorBoundary>
+        <SkillHubPage onClose={() => setSkillHubOpen(false)} />
+      </ErrorBoundary>
     )}
     {agentOrchestratorOpen && (
-      <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} getClient={getClient} />
+      <ErrorBoundary>
+        <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} getClient={getClient} getApiClient={getApiClient} />
+      </ErrorBoundary>
     )}
     {historyFilesOpen && (
-      <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} />
+      <ErrorBoundary>
+        <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} />
+      </ErrorBoundary>
     )}
     </>
   );

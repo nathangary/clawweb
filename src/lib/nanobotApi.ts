@@ -87,6 +87,87 @@ export interface CronLogEntry {
   };
 }
 
+export interface RuleFlowNode {
+  id: string;
+  type: 'skill' | 'condition' | 'loop' | 'start' | 'end';
+  skillId?: string;
+  skillName?: string;
+  label: string;
+  condition?: string;
+  loopConfig?: { maxIterations: number; condition: string };
+}
+
+export interface RuleFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+}
+
+export interface RuleFlowGraph {
+  nodes: RuleFlowNode[];
+  edges: RuleFlowEdge[];
+}
+
+export interface RuleSkillRef {
+  skillId: string;
+  name: string;
+  params: Record<string, unknown>;
+}
+
+export interface Rule {
+  id: string;
+  name: string;
+  description: string;
+  status: 'active' | 'draft' | 'disabled';
+  triggerType: 'manual' | 'cron' | 'webhook';
+  triggerConfig?: string;
+  runCount: number;
+  successRate: number;
+  lastRunAt?: string;
+  createdAt: string;
+  skills: RuleSkillRef[];
+  flow: RuleFlowGraph;
+  flowType: 'graph' | 'list';
+  systemPrompt: string;
+}
+
+export interface ServiceHealth {
+  name: string;
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+  latencyMs?: number;
+  lastChecked?: string;
+}
+
+export interface HealthReport {
+  overall: 'healthy' | 'degraded' | 'unhealthy';
+  services: ServiceHealth[];
+  checkedAt: string;
+}
+
+export interface RulePayload {
+  name: string;
+  description: string;
+  status?: 'active' | 'draft' | 'disabled';
+  triggerType: 'manual' | 'cron' | 'webhook';
+  triggerConfig?: string;
+  skills: RuleSkillRef[];
+  flow: RuleFlowGraph;
+  flowType?: 'graph' | 'list';
+  systemPrompt?: string;
+}
+
+export class ApiError extends Error {
+  status: number;
+  url: string;
+  constructor(message: string, status: number, url: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.url = url;
+  }
+}
+
 const isDebug = () => {
   try { return localStorage.getItem('pinchchat:debug') === '1'; } catch { return false; }
 };
@@ -97,7 +178,7 @@ export class NanobotApiClient {
   private token: string;
 
   constructor(baseUrl?: string, token?: string) {
-    this.baseUrl = baseUrl || `http://${window.location.hostname}:18790`;
+    this.baseUrl = baseUrl || `http://${window.location.hostname}:18790/api`;
     this.token = token || '';
   }
 
@@ -110,7 +191,7 @@ export class NanobotApiClient {
     return this.baseUrl;
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<NanobotApiResponse<T>> {
+  private async request<T>(path: string, options: RequestInit = {}, retries = 2): Promise<NanobotApiResponse<T>> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string> || {}),
@@ -125,20 +206,34 @@ export class NanobotApiClient {
     const url = `${normalizedBase}${normalizedPath}`;
     log('Request:', options.method || 'GET', url);
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: options.signal ?? AbortSignal.timeout(15000),
+        });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      log('Error response:', response.status, errorText);
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          log('Error response:', response.status, errorText);
+          throw new ApiError(`API error: ${response.status} ${response.statusText}`, response.status, url);
+        }
+
+        const data = await response.json();
+        log('Response:', data);
+        return data as NanobotApiResponse<T>;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < retries && lastError instanceof ApiError === false) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          continue;
+        }
+        throw lastError;
+      }
     }
-
-    const data = await response.json();
-    log('Response:', data);
-    return data as NanobotApiResponse<T>;
+    throw lastError ?? new Error('Unknown request error');
   }
 
   async getSessions(page = 1, pageSize = 50): Promise<NanobotApiResponse<{ sessions: NanobotSession[] }>> {
@@ -238,9 +333,85 @@ export class NanobotApiClient {
     return this.request(`/v1/admin/cron/jobs/logs?job_id=${encodeURIComponent(jobId)}&limit=${limit}`);
   }
 
-  healthCheck(): Promise<boolean> {
-    return fetch(`${this.baseUrl}/health`, { method: 'GET' })
-      .then(r => r.ok)
-      .catch(() => false);
+  async getRules(): Promise<NanobotApiResponse<{ rules: Rule[] }>> {
+    return this.request('/v1/admin/rules');
+  }
+
+  async getRule(ruleId: string): Promise<NanobotApiResponse<{ rule: Rule }>> {
+    return this.request(`/v1/admin/rules/${encodeURIComponent(ruleId)}`);
+  }
+
+  async createRule(payload: RulePayload): Promise<NanobotApiResponse<{ rule: Rule }>> {
+    return this.request('/v1/admin/rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateRule(ruleId: string, payload: Partial<RulePayload>): Promise<NanobotApiResponse<{ rule: Rule }>> {
+    return this.request(`/v1/admin/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteRule(ruleId: string): Promise<NanobotApiResponse<{ rule_id: string }>> {
+    return this.request(`/v1/admin/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getRuleStats(): Promise<NanobotApiResponse<{
+    total: number;
+    active: number;
+    draft: number;
+    disabled: number;
+    totalExecutions: number;
+    successRate: number;
+  }>> {
+    return this.request('/v1/admin/rules/stats');
+  }
+
+  async healthCheck(): Promise<HealthReport> {
+    const startTime = Date.now();
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { method: 'GET' });
+      const latency = Date.now() - startTime;
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.services) {
+          return {
+            overall: data.overall || 'healthy',
+            services: data.services.map((s: { name: string; status: string }) => ({
+              name: s.name,
+              status: s.status as ServiceHealth['status'],
+              latencyMs: latency,
+              lastChecked: new Date().toISOString(),
+            })),
+            checkedAt: new Date().toISOString(),
+          };
+        }
+        return {
+          overall: 'healthy',
+          services: [
+            { name: 'API服务', status: 'healthy', latencyMs: latency, lastChecked: new Date().toISOString() },
+            { name: '数据库', status: 'healthy', lastChecked: new Date().toISOString() },
+            { name: 'Agent引擎', status: 'healthy', lastChecked: new Date().toISOString() },
+          ],
+          checkedAt: new Date().toISOString(),
+        };
+      }
+    } catch {
+      // fall through
+    }
+    return {
+      overall: 'unhealthy',
+      services: [
+        { name: 'API服务', status: 'unhealthy', lastChecked: new Date().toISOString() },
+        { name: '数据库', status: 'unknown', lastChecked: new Date().toISOString() },
+        { name: 'Agent引擎', status: 'unknown', lastChecked: new Date().toISOString() },
+      ],
+      checkedAt: new Date().toISOString(),
+    };
   }
 }

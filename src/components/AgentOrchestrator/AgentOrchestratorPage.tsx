@@ -1,7 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plus, Settings, BarChart3, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, GripVertical, Bot, Zap, GitFork, Circle, Square, Loader2 } from 'lucide-react';
 import type { NanobotGatewayClient, NanobotOutboundEvent } from '../../lib/nanobotGateway';
-import { getStoredRules, saveRule, deleteRule, generateRuleId, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
+import type { NanobotApiClient } from '../../lib/nanobotApi';
+import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
+import { ToastContainer, type Toast } from '../Toast';
+import { Skeleton, CardSkeleton } from '../Skeleton';
 
 interface GenerationMessage {
   id: string;
@@ -31,23 +34,96 @@ const RULE_SYSTEM_PROMPT = `帮我生成一个场景，当我描述一个需求�
   "systemPrompt": "系统提示词..."
 }`;
 
+interface MonitorStats {
+  active: number;
+  totalExecutions: number;
+  successRate: number;
+  total: number;
+  draft: number;
+  disabled: number;
+}
+
 interface Props {
   onClose: () => void;
   getClient: () => NanobotGatewayClient | null;
+  getApiClient?: () => NanobotApiClient | null;
 }
 
-export function AgentOrchestratorPage({ onClose, getClient }: Props) {
+export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Props) {
   const [activeTab, setActiveTab] = useState<'create' | 'rules' | 'monitor'>('create');
   const [description, setDescription] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [rulesError, setRulesError] = useState<string | null>(null);
   const [genMessages, setGenMessages] = useState<GenerationMessage[]>([]);
+  const [monitorStats, setMonitorStats] = useState<MonitorStats | null>(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const eventHandlerRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    setRules(getStoredRules());
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  const showToast = useCallback((type: Toast['type'], message: string, duration = 3000) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts(prev => [...prev, { id, type, message, duration }]);
+    if (duration > 0) {
+      setTimeout(() => dismissToast(id), duration);
+    }
+  }, [dismissToast]);
+
+  const fetchRules = useCallback(async () => {
+    setRulesLoading(true);
+    setRulesError(null);
+    try {
+      const data = await loadRules();
+      setRules(data);
+    } catch {
+      setRulesError('加载规则失败，请检查网络连接');
+      setRules([]);
+      showToast('error', '加载规则失败');
+    } finally {
+      setRulesLoading(false);
+    }
+  }, []);
+
+  const fetchMonitorStats = useCallback(async () => {
+    if (!getApiClient) return;
+    setMonitorLoading(true);
+    try {
+      const client = getApiClient();
+      if (client) {
+        const res = await client.getRuleStats();
+        if (res.applied && res.data) {
+          setMonitorStats({
+            active: res.data.active ?? 0,
+            totalExecutions: res.data.totalExecutions ?? 0,
+            successRate: res.data.successRate ?? 0,
+            total: res.data.total ?? 0,
+            draft: res.data.draft ?? 0,
+            disabled: res.data.disabled ?? 0,
+          });
+        }
+      }
+    } catch {
+      setMonitorStats(null);
+    } finally {
+      setMonitorLoading(false);
+    }
+  }, [getApiClient]);
+
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
+
+  useEffect(() => {
+    if (activeTab === 'monitor') {
+      fetchMonitorStats();
+    }
+  }, [activeTab, fetchMonitorStats]);
 
   useEffect(() => {
     return () => {
@@ -80,7 +156,7 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
     if (!description.trim()) return;
     const client = getClient();
     if (!client) {
-      alert('请先连接 Gateway');
+      showToast('error', '请先连接 Gateway');
       return;
     }
 
@@ -140,71 +216,81 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
       } else if (event.eventType === 'final' && event.content) {
         handled = true;
         client.ack(event.eventId);
-        try {
-          let jsonStr = event.content.trim();
-          
-          if (jsonStr.startsWith('```')) {
-            jsonStr = jsonStr.replace(/```(?:json)?\n?/g, '').trim();
+        (async () => {
+          try {
+            let jsonStr = event.content.trim();
+            
+            if (jsonStr.startsWith('```')) {
+              jsonStr = jsonStr.replace(/```(?:json)?\n?/g, '').trim();
+            }
+            
+            const parsed = JSON.parse(jsonStr);
+            const ruleData = parsed.rule || parsed;
+            
+            const normalizeNodes = (nodes: any[]): any[] => {
+              return nodes.map(node => ({
+                id: node.id || node.name || String(Math.random()),
+                type: node.type === 'trigger' ? 'start' : 
+                      node.type === 'end' ? 'end' : 
+                      node.type === 'condition' ? 'condition' : 
+                      node.type === 'action' ? 'skill' : node.type,
+                label: node.label || node.name || '未命名',
+                skillId: node.config?.skillId || node.skillId,
+                skillName: node.name,
+              }));
+            };
+            
+            const normalizeEdges = (edges: any[]): any[] => {
+              return edges.map(edge => ({
+                id: `e-${edge.from}-${edge.to}`,
+                source: edge.from,
+                target: edge.to,
+                label: edge.label || (edge.condition ? (edge.condition === 'sufficient' ? '是' : '否') : ''),
+              }));
+            };
+            
+            const newRule: Rule = {
+              id: generateRuleId(),
+              name: ruleData.name || '未命名规则',
+              description: ruleData.description || description,
+              status: 'draft',
+              triggerType: ruleData.triggerType || 'manual',
+              triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig),
+              runCount: 0,
+              successRate: 0,
+              createdAt: new Date().toISOString(),
+              skills: ruleData.skills || [],
+              flow: {
+                nodes: normalizeNodes(ruleData.flow?.nodes || []),
+                edges: normalizeEdges(ruleData.flow?.edges || []),
+              },
+              flowType: 'graph',
+              systemPrompt: parsed.systemPrompt || '',
+            };
+            const saved = await saveRule(newRule);
+            if (saved) {
+              invalidateRulesCache();
+              await fetchRules();
+              setDescription('');
+              showToast('success', `规则「${saved.name}」已创建成功`, 4000);
+              setSelectedRule(saved);
+            } else {
+              showToast('error', '规则保存失败，请重试');
+            }
+          } catch (e) {
+            console.error('解析规则失败:', e);
+            console.error('原始内容:', event.content);
+            showToast('error', '规则生成失败，请重试');
+          } finally {
+            setIsGenerating(false);
+            setGenMessages([]);
           }
-          
-          const parsed = JSON.parse(jsonStr);
-          const ruleData = parsed.rule || parsed;
-          
-          const normalizeNodes = (nodes: any[]): any[] => {
-            return nodes.map(node => ({
-              id: node.id || node.name || String(Math.random()),
-              type: node.type === 'trigger' ? 'start' : 
-                    node.type === 'end' ? 'end' : 
-                    node.type === 'condition' ? 'condition' : 
-                    node.type === 'action' ? 'skill' : node.type,
-              label: node.label || node.name || '未命名',
-              skillId: node.config?.skillId || node.skillId,
-              skillName: node.name,
-            }));
-          };
-          
-          const normalizeEdges = (edges: any[]): any[] => {
-            return edges.map(edge => ({
-              id: `e-${edge.from}-${edge.to}`,
-              source: edge.from,
-              target: edge.to,
-              label: edge.label || (edge.condition ? (edge.condition === 'sufficient' ? '是' : '否') : ''),
-            }));
-          };
-          
-          const newRule: Rule = {
-            id: generateRuleId(),
-            name: ruleData.name || '未命名规则',
-            description: ruleData.description || description,
-            status: 'draft',
-            triggerType: ruleData.triggerType || 'manual',
-            triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig),
-            runCount: 0,
-            successRate: 0,
-            createdAt: new Date().toISOString(),
-            skills: ruleData.skills || [],
-            flow: {
-              nodes: normalizeNodes(ruleData.flow?.nodes || []),
-              edges: normalizeEdges(ruleData.flow?.edges || []),
-            },
-            flowType: 'graph',
-            systemPrompt: parsed.systemPrompt || '',
-          };
-          saveRule(newRule);
-          setRules(getStoredRules());
-          setDescription('');
-        } catch (e) {
-          console.error('解析规则失败:', e);
-          console.error('原始内容:', event.content);
-          alert('规则生成失败，请重试');
-        }
-        setIsGenerating(false);
-        setGenMessages([]);
+        })();
       } else if (event.eventType === 'error') {
         handled = true;
         setIsGenerating(false);
         setGenMessages([]);
-        alert('生成规则时出错');
+        showToast('error', '生成规则时出错');
       }
     };
 
@@ -212,9 +298,16 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
     eventHandlerRef.current = unsubscribe;
   };
 
-  const handleDeleteRule = (ruleId: string) => {
-    deleteRule(ruleId);
-    setRules(getStoredRules());
+  const handleDeleteRule = async (ruleId: string) => {
+    const rule = rules.find(r => r.id === ruleId);
+    const ok = await deleteRule(ruleId);
+    if (ok) {
+      invalidateRulesCache();
+      await fetchRules();
+      showToast('success', `规则「${rule?.name || '未知'}」已删除`);
+    } else {
+      showToast('error', '删除规则失败');
+    }
   };
 
   const displayedRules = rules.length > 0 ? rules : [];
@@ -225,6 +318,7 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
 
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--pc-bg-base)] flex flex-col overflow-hidden">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <header className="shrink-0 border-b border-pc-border bg-[var(--pc-bg-surface)]/80 backdrop-blur-xl">
         <div className="flex items-center justify-between px-6 h-16">
           <div className="flex items-center gap-3">
@@ -302,11 +396,22 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
               <h2 className="text-lg font-medium text-pc-text">已创建的规则</h2>
               <span className="text-sm text-pc-text-muted">{displayedRules.length} 个规则</span>
             </div>
-            <div className="flex flex-col gap-3">
-              {displayedRules.length === 0 ? (
-                <div className="text-center py-12 text-pc-text-muted">暂无规则，请先创建</div>
-              ) : (
-                displayedRules.map((rule) => (
+            {rulesLoading ? (
+              <div className="flex flex-col gap-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <CardSkeleton key={i} />
+                ))}
+              </div>
+            ) : rulesError ? (
+              <div className="text-center py-12">
+                <p className="text-sm text-red-400 mb-3">{rulesError}</p>
+                <button onClick={fetchRules} className="px-4 py-2 rounded-lg text-sm bg-[var(--pc-accent-glow)] text-pc-accent hover:opacity-80 transition-colors">重试</button>
+              </div>
+            ) : displayedRules.length === 0 ? (
+              <div className="text-center py-12 text-pc-text-muted">暂无规则，请先创建</div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {displayedRules.map((rule) => (
                   <div key={rule.id} onClick={() => setSelectedRule(rule)} className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border hover:border-[var(--pc-accent-dim)] transition-colors cursor-pointer">
                     <div className="flex items-start justify-between mb-3">
                       <div>
@@ -326,16 +431,38 @@ export function AgentOrchestratorPage({ onClose, getClient }: Props) {
                       <div className="flex items-center gap-1 text-xs text-pc-accent"><span>查看流程</span><ChevronRight size={12} /></div>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {activeTab === 'monitor' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">2</div><div className="text-sm text-pc-text-muted">活跃规则</div></div>
-            <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">180</div><div className="text-sm text-pc-text-muted">总执行次数</div></div>
-            <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">98.5%</div><div className="text-sm text-pc-text-muted">成功率</div></div>
+          <div>
+            {monitorLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-20 rounded-2xl" />
+                ))}
+              </div>
+            ) : monitorStats ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.active}</div><div className="text-sm text-pc-text-muted">活跃规则</div></div>
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.totalExecutions}</div><div className="text-sm text-pc-text-muted">总执行次数</div></div>
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.successRate}%</div><div className="text-sm text-pc-text-muted">成功率</div></div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.total}</div><div className="text-sm text-pc-text-muted">规则总数</div></div>
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.draft}</div><div className="text-sm text-pc-text-muted">草稿</div></div>
+                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.disabled}</div><div className="text-sm text-pc-text-muted">已禁用</div></div>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-12 text-pc-text-muted">
+                <p className="mb-3">监控数据暂不可用</p>
+                <button onClick={fetchMonitorStats} className="px-4 py-2 rounded-lg text-sm bg-[var(--pc-accent-glow)] text-pc-accent hover:opacity-80 transition-colors">刷新</button>
+              </div>
+            )}
           </div>
         )}
       </main>

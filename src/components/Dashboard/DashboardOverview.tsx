@@ -1,4 +1,5 @@
-import { Brain, Radio, Target, Zap, Activity, Clock, CheckCircle, XCircle, Server, Database, Cpu, Gauge, BarChart3 } from 'lucide-react';
+import { Brain, Radio, Target, Zap, Activity, Clock, CheckCircle, XCircle, Gauge, BarChart3, Server, Database, Cpu } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import type { DashboardData } from '../../hooks/useDashboardPage';
 
 interface Props {
@@ -37,12 +38,17 @@ export function DashboardOverview({ data, onTabChange }: Props) {
     { title: '执行', value: totalExecutions, label: `${successRate}% 成功率`, icon: Activity, color: 'from-cyan-500 to-blue-500', tab: 'tasks' as const },
   ];
 
-  const systemHealth = [
-    { name: 'API服务', status: 'healthy', icon: Server },
-    { name: '数据库', status: 'healthy', icon: Database },
-    { name: 'Cron调度', status: runningCrons > 0 ? 'healthy' : 'idle', icon: Clock },
-    { name: 'Agent引擎', status: 'healthy', icon: Cpu },
+  const systemHealth = data.health?.services ?? [
+    { name: 'API服务', status: 'unknown' as const },
+    { name: '数据库', status: 'unknown' as const },
+    { name: 'Agent引擎', status: 'unknown' as const },
   ];
+
+  const chartData = data.cronJobs.slice(0, 12).map(job => ({
+    name: job.name.slice(0, 6),
+    value: job.state.last_status === 'ok' ? 100 : job.state.last_status === 'error' ? 50 : 10,
+    fill: job.state.last_status === 'ok' ? 'rgba(16,185,129,0.6)' : job.state.last_status === 'error' ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.1)',
+  }));
 
   const quickActions = [
     { label: '新建任务', icon: Target, action: () => onTabChange('tasks') },
@@ -84,30 +90,50 @@ export function DashboardOverview({ data, onTabChange }: Props) {
               <BarChart3 size={16} className="text-cyan-400" />
               任务执行趋势
             </h3>
-            <div className="flex items-end gap-1 h-24">
-              {data.cronJobs.slice(0, 12).map((job, idx) => {
-                const height = job.state.last_status === 'ok' ? 80 : job.state.last_status === 'error' ? 40 : 20;
-                return (
-                  <div key={idx} className="flex-1 flex flex-col items-center gap-1">
-                    <div 
-                      className={`w-full rounded-t ${job.state.last_status === 'ok' ? 'bg-emerald-500/60' : job.state.last_status === 'error' ? 'bg-red-500/60' : 'bg-white/10'}`}
-                      style={{ height: `${height}%` }}
+            {data.cronJobs.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
                     />
-                    <span className="text-[8px] text-white/30 truncate w-full text-center">{job.name.slice(0, 4)}</span>
-                  </div>
-                );
-              })}
-              {data.cronJobs.length === 0 && (
-                <div className="flex-1 flex items-center justify-center text-white/30 text-sm">
-                  暂无执行数据
+                    <YAxis
+                      tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={30}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'rgba(20,20,30,0.95)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '12px',
+                        backdropFilter: 'blur(12px)',
+                        fontSize: '12px',
+                      }}
+                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                    />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={32}>
+                      {chartData.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-white/40">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/60" /> 成功</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-500/60" /> 失败</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-white/10" /> 未执行</span>
                 </div>
-              )}
-            </div>
-            <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-white/40">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/60" /> 成功</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-500/60" /> 失败</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-white/10" /> 未执行</span>
-            </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-32 text-white/30 text-sm">
+                暂无执行数据
+              </div>
+            )}
           </div>
 
           <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
@@ -152,18 +178,19 @@ export function DashboardOverview({ data, onTabChange }: Props) {
             </h3>
             <div className="space-y-3">
               {systemHealth.map((item, idx) => {
-                const Icon = item.icon;
+                const Icon = item.name?.includes('API') ? Server : item.name?.includes('数据库') ? Database : item.name?.includes('Agent') ? Cpu : Clock;
                 const isHealthy = item.status === 'healthy';
+                const isUnknown = item.status === 'unknown';
                 return (
                   <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${isHealthy ? 'bg-emerald-500/20' : 'bg-amber-500/20'}`}>
-                        <Icon size={14} className={isHealthy ? 'text-emerald-400' : 'text-amber-400'} />
+                      <div className={`p-2 rounded-lg ${isHealthy ? 'bg-emerald-500/20' : isUnknown ? 'bg-white/10' : 'bg-amber-500/20'}`}>
+                        <Icon size={14} className={isHealthy ? 'text-emerald-400' : isUnknown ? 'text-white/40' : 'text-amber-400'} />
                       </div>
                       <span className="text-sm text-white/70">{item.name}</span>
                     </div>
-                    <span className={`text-xs ${isHealthy ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      {isHealthy ? '正常' : '空闲'}
+                    <span className={`text-xs ${isHealthy ? 'text-emerald-400' : isUnknown ? 'text-white/40' : 'text-amber-400'}`}>
+                      {isHealthy ? '正常' : isUnknown ? '未知' : item.status === 'unhealthy' ? '异常' : '降级'}
                     </span>
                   </div>
                 );

@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { NanobotGatewayClient, type NanobotOutboundEvent } from '../lib/nanobotGateway';
-import { NanobotApiClient } from '../lib/nanobotApi';
+import { useConnectionStore } from '../stores/connectionStore';
+import { getStoredCredentials } from '../lib/credentials';
 import { genId } from '../lib/utils';
-import { getStoredCredentials, storeCredentials, clearCredentials } from '../lib/credentials';
-import type { ChatMessage, MessageBlock, ConnectionStatus, Session } from '../types';
+import type { ChatMessage, MessageBlock, Session } from '../types';
+import type { NanobotOutboundEvent } from '../lib/nanobotGateway';
 
 export function useGateway() {
-  const wsClientRef = useRef<NanobotGatewayClient | null>(null);
-  const apiClientRef = useRef<NanobotApiClient | null>(null);
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
+  const status = useConnectionStore(s => s.status);
+  const getClient = useConnectionStore(s => s.getClient);
+  const getApiClient = useConnectionStore(s => s.getApiClient);
+  const disconnect = useConnectionStore(s => s.disconnect);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState('transport:web');
@@ -20,12 +22,22 @@ export function useGateway() {
   const isConnectingRef = useRef(false);
   const messagesRef = useRef(messages);
   const activeSessionRef = useRef(activeSession);
-  const sessionsRef = useRef(sessions);
   const currentEventIdRef = useRef<string | null>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
-  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+
+  const initRef = useRef(false);
+  useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+    const stored = getStoredCredentials();
+    if (stored?.url && (stored.url.startsWith('ws://') || stored.url.startsWith('wss://'))) {
+      login(stored.url, stored.token);
+    } else {
+      setAuthenticated(false);
+    }
+  }, []);
 
   const handleEvent = useCallback((event: NanobotOutboundEvent) => {
     const eventSession = event.sessionKey;
@@ -47,7 +59,7 @@ export function useGateway() {
       return;
     }
 
-    wsClientRef.current?.ack(event.eventId);
+    getClient()?.ack(event.eventId);
 
     if (event.eventType === 'progress') {
       const text = event.content;
@@ -190,7 +202,7 @@ export function useGateway() {
         }];
       });
     }
-  }, []);
+  }, [getClient]);
 
   function extractToolInfo(hint: unknown): { name: string; args: Record<string, unknown> } | null {
     if (typeof hint !== 'string') return null;
@@ -202,9 +214,10 @@ export function useGateway() {
   }
 
   const loadSessions = useCallback(async () => {
-    if (!apiClientRef.current) return;
+    const api = getApiClient();
+    if (!api) return;
     try {
-      const res = await apiClientRef.current.getSessions();
+      const res = await api.getSessions();
       if (res.applied && res.data.sessions) {
         setSessions(res.data.sessions.map(s => ({
           key: s.key,
@@ -215,15 +228,16 @@ export function useGateway() {
     } catch {
       setSessions([]);
     }
-  }, []);
+  }, [getApiClient]);
 
   const loadHistory = useCallback(async (sessionKey: string) => {
-    if (!apiClientRef.current) return;
+    const api = getApiClient();
+    if (!api) return;
     setIsLoadingHistory(true);
     try {
-      const res = await apiClientRef.current.getSessionHistory(sessionKey, 1, 100, 'asc');
+      const res = await api.getSessionHistory(sessionKey, 1, 100, 'asc');
       if (res.applied && res.data.messages) {
-        const baseUrl = apiClientRef.current.getBaseUrl().replace('/api', '');
+        const baseUrl = api.getBaseUrl().replace('/api', '');
         const msgs: ChatMessage[] = res.data.messages.map((m, i) => {
           const blocks: MessageBlock[] = [];
           if (m.media && Array.isArray(m.media)) {
@@ -259,34 +273,19 @@ export function useGateway() {
     } finally {
       setIsLoadingHistory(false);
     }
-  }, []);
+  }, [getApiClient]);
 
-  const setupClient = useCallback((wsUrl: string, token?: string, restUrl?: string) => {
-    if (wsClientRef.current) {
-      wsClientRef.current.disconnect();
-    }
-    const apiUrl = restUrl || `http://${new URL(wsUrl).hostname}:18790`;
-    if (!apiClientRef.current) {
-      apiClientRef.current = new NanobotApiClient(apiUrl, token);
-    } else {
-      apiClientRef.current.setCredentials(apiUrl, token);
-    }
-
-    const client = new NanobotGatewayClient(wsUrl, token);
-    wsClientRef.current = client;
-
-    client.onStatus((s) => {
-      setStatus(s);
-      if (s === 'connected') {
-        setAuthenticated(true);
-        setConnectError(null);
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        storeCredentials(wsUrl, token, restUrl);
-        loadSessions();
-        loadHistory(activeSessionRef.current);
-      } else if (s === 'disconnected' && !client.isConnected) {
-        if (isConnectingRef.current) {
+  useEffect(() => {
+    const unsub = useConnectionStore.subscribe((state, prevState) => {
+      if (state.status !== prevState.status) {
+        if (state.status === 'connected') {
+          setAuthenticated(true);
+          setConnectError(null);
+          setIsConnecting(false);
+          isConnectingRef.current = false;
+          loadSessions();
+          loadHistory(activeSessionRef.current);
+        } else if (state.status === 'disconnected' && isConnectingRef.current) {
           setConnectError('Connection failed — check URL');
           setIsConnecting(false);
           isConnectingRef.current = false;
@@ -294,26 +293,8 @@ export function useGateway() {
         }
       }
     });
-
-    client.onEvent(handleEvent);
-
-    setIsConnecting(true);
-    isConnectingRef.current = true;
-    setConnectError(null);
-    client.connect();
-  }, [handleEvent, loadHistory, loadSessions]);
-
-  const initRef = useRef(false);
-  useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
-    const stored = getStoredCredentials();
-    if (stored) {
-      setupClient(stored.url, stored.token, stored.restUrl);
-    } else {
-      setAuthenticated(false);
-    }
-  }, [setupClient]);
+    return unsub;
+  }, [loadHistory, loadSessions]);
 
   const sendMessage = useCallback(async (text: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => {
     const msgId = 'user-' + Date.now();
@@ -332,14 +313,14 @@ export function useGateway() {
     setIsGenerating(true);
 
     try {
-      wsClientRef.current?.send(text, attachments);
+      getClient()?.send(text, attachments);
       currentEventIdRef.current = genId('event');
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'sent' as const } : m));
     } catch {
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'error' as const } : m));
       setIsGenerating(false);
     }
-  }, []);
+  }, [getClient]);
 
   const abort = useCallback(async () => {
     setIsGenerating(false);
@@ -358,22 +339,20 @@ export function useGateway() {
     switchSession(newSessionKey);
   }, [switchSession]);
 
-  const login = useCallback((url: string, token?: string, restUrl?: string) => {
-    setupClient(url, token, restUrl);
-  }, [setupClient]);
+  const login = useCallback((url: string, token?: string) => {
+    setIsConnecting(true);
+    isConnectingRef.current = true;
+    setConnectError(null);
+    useConnectionStore.getState().connect(url, token, undefined, handleEvent);
+  }, [handleEvent]);
 
   const logout = useCallback(() => {
-    if (wsClientRef.current) {
-      wsClientRef.current.disconnect();
-      wsClientRef.current = null;
-    }
-    clearCredentials();
+    disconnect();
     setAuthenticated(false);
     setMessages([]);
     setSessions([]);
-    setStatus('disconnected');
     setConnectError(null);
-  }, []);
+  }, [disconnect]);
 
   useEffect(() => {
     if (status !== 'connected') return;
@@ -387,9 +366,6 @@ export function useGateway() {
     hasUnread: false,
     unreadCount: 0,
   }));
-
-  const getClient = useCallback(() => wsClientRef.current, []);
-  const getApiClient = useCallback(() => apiClientRef.current, []);
 
   return {
     status, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
