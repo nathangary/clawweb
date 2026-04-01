@@ -56,7 +56,7 @@ export function DashboardPage({ apiClient, onClose }: Props) {
             </div>
           </div>
           <div>
-            <h1 className="font-semibold text-white text-sm">NanoBot</h1>
+            <h1 className="font-semibold text-white text-sm">伯俊智能</h1>
             <p className="text-[10px] text-white/40">监控面板</p>
           </div>
         </div>

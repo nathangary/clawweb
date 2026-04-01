@@ -43,7 +43,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     }
 
     const cid = clientId || 'webchat';
-    const apiUrl = `http://${new URL(url).hostname}:18790/api`;
+    const apiUrl = import.meta.env.DEV ? '/api' : `http://${new URL(url).hostname}:18790/api`;
 
     let api = existingApi;
     if (!api) {

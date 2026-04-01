@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Plus, Settings, BarChart3, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, GripVertical, Bot, Zap, GitFork, Circle, Square, Loader2 } from 'lucide-react';
+import { X, Plus, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, GripVertical, Bot, Zap, GitFork, Circle, Square, Loader2, Search, Activity, CheckCircle, Power, PowerOff } from 'lucide-react';
 import type { NanobotGatewayClient, NanobotOutboundEvent } from '../../lib/nanobotGateway';
 import type { NanobotApiClient } from '../../lib/nanobotApi';
-import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
+import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
 import { ToastContainer, type Toast } from '../Toast';
-import { Skeleton, CardSkeleton } from '../Skeleton';
+import { CardSkeleton } from '../Skeleton';
 
 interface GenerationMessage {
   id: string;
@@ -21,7 +21,7 @@ const RULE_SYSTEM_PROMPT = `帮我生成一个场景，当我描述一个需求�
 4. 生成系统提示词（用于后续智能体对话）
 
 输出格式要求：
-请直接输出 JSON，格式如下：
+最后输出 JSON，格式如下：
 {
   "rule": {
     "name": "规则名称",
@@ -50,7 +50,7 @@ interface Props {
 }
 
 export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Props) {
-  const [activeTab, setActiveTab] = useState<'create' | 'rules' | 'monitor'>('create');
+  const [showCreate, setShowCreate] = useState(false);
   const [description, setDescription] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
@@ -59,8 +59,9 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [genMessages, setGenMessages] = useState<GenerationMessage[]>([]);
   const [monitorStats, setMonitorStats] = useState<MonitorStats | null>(null);
-  const [monitorLoading, setMonitorLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'draft' | 'disabled'>('all');
   const eventHandlerRef = useRef<(() => void) | null>(null);
 
   const dismissToast = useCallback((id: string) => {
@@ -88,11 +89,10 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     } finally {
       setRulesLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   const fetchMonitorStats = useCallback(async () => {
     if (!getApiClient) return;
-    setMonitorLoading(true);
     try {
       const client = getApiClient();
       if (client) {
@@ -110,20 +110,13 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       }
     } catch {
       setMonitorStats(null);
-    } finally {
-      setMonitorLoading(false);
     }
   }, [getApiClient]);
 
   useEffect(() => {
     fetchRules();
-  }, [fetchRules]);
-
-  useEffect(() => {
-    if (activeTab === 'monitor') {
-      fetchMonitorStats();
-    }
-  }, [activeTab, fetchMonitorStats]);
+    fetchMonitorStats();
+  }, [fetchRules, fetchMonitorStats]);
 
   useEffect(() => {
     return () => {
@@ -169,8 +162,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
 
     const handleRuleEvent = (event: NanobotOutboundEvent) => {
       if (handled) return;
-      
-      console.log('Rule event:', event.eventType, event);
       
       if (event.eventType === 'progress') {
         const text = event.content;
@@ -219,11 +210,9 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         (async () => {
           try {
             let jsonStr = event.content.trim();
-            
             if (jsonStr.startsWith('```')) {
               jsonStr = jsonStr.replace(/```(?:json)?\n?/g, '').trim();
             }
-            
             const parsed = JSON.parse(jsonStr);
             const ruleData = parsed.rule || parsed;
             
@@ -271,16 +260,17 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
             if (saved) {
               invalidateRulesCache();
               await fetchRules();
+              await fetchMonitorStats();
               setDescription('');
-              showToast('success', `规则「${saved.name}」已创建成功`, 4000);
+              setShowCreate(false);
+              showToast('success', `智能体「${saved.name}」已创建成功`, 4000);
               setSelectedRule(saved);
             } else {
-              showToast('error', '规则保存失败，请重试');
+              showToast('error', '智能体保存失败，请重试');
             }
           } catch (e) {
             console.error('解析规则失败:', e);
-            console.error('原始内容:', event.content);
-            showToast('error', '规则生成失败，请重试');
+            showToast('error', '智能体生成失败，请重试');
           } finally {
             setIsGenerating(false);
             setGenMessages([]);
@@ -290,7 +280,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         handled = true;
         setIsGenerating(false);
         setGenMessages([]);
-        showToast('error', '生成规则时出错');
+        showToast('error', '生成智能体时出错');
       }
     };
 
@@ -304,13 +294,34 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     if (ok) {
       invalidateRulesCache();
       await fetchRules();
-      showToast('success', `规则「${rule?.name || '未知'}」已删除`);
+      await fetchMonitorStats();
+      showToast('success', `智能体「${rule?.name || '未知'}」已删除`);
     } else {
-      showToast('error', '删除规则失败');
+      showToast('error', '删除智能体失败');
     }
   };
 
-  const displayedRules = rules.length > 0 ? rules : [];
+  const handleToggleStatus = async (rule: Rule) => {
+    const newStatus = rule.status === 'active' ? 'disabled' : 'active';
+    const updated = await updateRuleStatus(rule.id, newStatus);
+    if (updated) {
+      invalidateRulesCache();
+      await fetchRules();
+      await fetchMonitorStats();
+      showToast('success', `智能体「${updated.name}」已${newStatus === 'active' ? '启用' : '停用'}`);
+    } else {
+      showToast('error', '操作失败');
+    }
+  };
+
+  const filteredRules = rules.filter(r => {
+    if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   if (selectedRule) {
     return <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} />;
@@ -319,13 +330,15 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--pc-bg-base)] flex flex-col overflow-hidden">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      
+      {/* Header */}
       <header className="shrink-0 border-b border-pc-border bg-[var(--pc-bg-surface)]/80 backdrop-blur-xl">
         <div className="flex items-center justify-between px-6 h-16">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-r from-cyan-400/15 to-violet-500/15 blur-lg" />
-              <div className="relative flex h-9 w-9 items-center justify-center rounded-xl overflow-hidden">
-                <span className="text-2xl">🤖</span>
+              <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20">
+                <Bot size={18} className="text-pc-accent" />
               </div>
             </div>
             <div>
@@ -333,139 +346,303 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
               <p className="text-[11px] text-pc-text-muted">用自然语言创建 AI 智能体</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2.5 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted hover:text-pc-text transition-colors" aria-label="关闭">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="px-6 pb-4">
-          <div className="flex items-center gap-1 bg-[var(--pc-bg-base)]/50 p-1 rounded-xl border border-pc-border">
-            <button onClick={() => setActiveTab('create')} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'create' ? 'bg-[var(--pc-accent)] text-zinc-900 shadow-[0_2px_8px_rgba(var(--pc-accent-rgb),0.2)]' : 'text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)]'}`}>
-              <Plus size={14} className="inline mr-1.5" />创建规则
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]">
+              <Plus size={16} />创建智能体
             </button>
-            <button onClick={() => setActiveTab('rules')} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'rules' ? 'bg-[var(--pc-accent)] text-zinc-900 shadow-[0_2px_8px_rgba(var(--pc-accent-rgb),0.2)]' : 'text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)]'}`}>
-              <Settings size={14} className="inline mr-1.5" />规则管理
-            </button>
-            <button onClick={() => setActiveTab('monitor')} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'monitor' ? 'bg-[var(--pc-accent)] text-zinc-900 shadow-[0_2px_8px_rgba(var(--pc-accent-rgb),0.2)]' : 'text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)]'}`}>
-              <BarChart3 size={14} className="inline mr-1.5" />监控
+            <button onClick={onClose} className="p-2.5 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted hover:text-pc-text transition-colors" aria-label="关闭">
+              <X size={20} />
             </button>
           </div>
         </div>
       </header>
-      <main className="flex-1 overflow-y-auto p-6">
-        {activeTab === 'create' && (
-          <div className="max-w-2xl mx-auto">
-            <div className="mb-8">
-              <h2 className="text-lg font-medium text-pc-text mb-2">描述你想要实现的功能</h2>
-              <p className="text-sm text-pc-text-muted">用自然语言描述你的需求，AI 会自动帮你选择技能并编排流程</p>
-            </div>
-            <div className="relative">
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="例如：当有新订单时，自动检查库存，如果库存不足则发送提醒通知采购部门..." className="w-full h-40 p-4 rounded-2xl border border-pc-border bg-[var(--pc-bg-surface)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none" />
-              <button onClick={handleGenerateRule} disabled={!description.trim() || isGenerating} className="absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]">
-                {isGenerating ? (<><div className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin" /><span>生成中...</span></>) : (<><span>✨</span><span>生成规则</span></>)}
-              </button>
-            </div>
-            {isGenerating && genMessages.length > 0 && (
-              <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-surface)] border border-pc-border max-h-64 overflow-y-auto">
-                <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
-                  <Loader2 size={14} className="animate-spin text-pc-accent" /><span>生成过程</span>
-                </div>
-                <div className="space-y-2">
-                  {genMessages.map((msg) => (
-                    <div key={msg.id} className="text-sm">
-                      {msg.type === 'thinking' && (<div className="flex items-start gap-2"><span className="text-pc-accent">💭</span><span className="text-pc-text-muted text-xs">{msg.content.slice(0, 200)}...</span></div>)}
-                      {msg.type === 'tool_use' && (<div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30"><Zap size={12} className="text-pc-accent" /><span className="text-pc-text text-xs">调用工具: {msg.name}</span></div>)}
-                      {msg.type === 'text' && (<div className="text-pc-text text-xs">{msg.content.slice(0, 100)}...</div>)}
-                    </div>
-                  ))}
-                </div>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto">
+        {/* Stats Bar */}
+        {monitorStats && (
+          <div className="px-6 pt-4 pb-2">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs">
+                <Activity size={12} />
+                <span>{monitorStats.active} 活跃</span>
               </div>
-            )}
-            <div className="mt-8 p-4 rounded-xl bg-[var(--pc-bg-surface)] border border-pc-border">
-              <h3 className="text-sm font-medium text-pc-text mb-3">使用示例</h3>
-              <div className="flex flex-col gap-2">
-                {['当有新订单时，自动检查库存并通知仓库备货', '每天早上9点汇总昨日销售数据生成报表', '客户提交工单时，自动识别问题类型并分配给对应部门', '检测到网站异常时自动发送告警并创建故障工单'].map((example, idx) => (
-                  <button key={idx} onClick={() => setDescription(example)} className="text-left px-3 py-2 rounded-lg text-sm text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">{example}</button>
-                ))}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--pc-accent-glow)] text-pc-accent text-xs">
+                <Zap size={12} />
+                <span>{monitorStats.totalExecutions} 执行</span>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-pc-text-muted text-xs">
+                <CheckCircle size={12} />
+                <span>{monitorStats.successRate}% 成功率</span>
               </div>
             </div>
           </div>
         )}
-        {activeTab === 'rules' && (
-          <div>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-pc-text">已创建的规则</h2>
-              <span className="text-sm text-pc-text-muted">{displayedRules.length} 个规则</span>
+
+        {/* Search & Filter */}
+        <div className="px-6 py-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-pc-text-muted" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索智能体..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-[var(--pc-bg-surface)] border border-pc-border text-sm text-pc-text placeholder:text-pc-text-muted outline-none focus:border-[var(--pc-accent-dim)] transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-1 bg-[var(--pc-bg-surface)] p-1 rounded-xl border border-pc-border">
+            {([['all', '全部'], ['active', '活跃'], ['draft', '草稿'], ['disabled', '停用']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setFilterStatus(key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filterStatus === key ? 'bg-[var(--pc-accent)] text-zinc-900' : 'text-pc-text-muted hover:text-pc-text'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Agent Grid */}
+        <div className="px-6 pb-6">
+          {rulesLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <CardSkeleton key={i} />
+              ))}
             </div>
-            {rulesLoading ? (
-              <div className="flex flex-col gap-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <CardSkeleton key={i} />
-                ))}
+          ) : rulesError ? (
+            <div className="text-center py-12">
+              <p className="text-sm text-red-400 mb-3">{rulesError}</p>
+              <button onClick={fetchRules} className="px-4 py-2 rounded-lg text-sm bg-[var(--pc-accent-glow)] text-pc-accent hover:opacity-80 transition-colors">重试</button>
+            </div>
+          ) : filteredRules.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Bot size={48} className="text-pc-text-muted/30 mb-4" />
+              <p className="text-pc-text-muted text-sm mb-1">
+                {searchQuery || filterStatus !== 'all' ? '没有找到匹配的智能体' : '还没有智能体'}
+              </p>
+              <p className="text-pc-text-muted/60 text-xs mb-4">
+                {searchQuery || filterStatus !== 'all' ? '试试调整筛选条件' : '点击上方按钮创建你的第一个智能体'}
+              </p>
+              {!searchQuery && filterStatus === 'all' && (
+                <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 transition-all">
+                  <Plus size={16} />创建智能体
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredRules.map((rule) => (
+                <AgentCard
+                  key={rule.id}
+                  rule={rule}
+                  onClick={() => setSelectedRule(rule)}
+                  onDelete={() => handleDeleteRule(rule.id)}
+                  onToggle={() => handleToggleStatus(rule)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Create Modal */}
+      {showCreate && (
+        <CreateModal
+          onClose={() => { setShowCreate(false); setDescription(''); setIsGenerating(false); setGenMessages([]); }}
+          description={description}
+          setDescription={setDescription}
+          isGenerating={isGenerating}
+          genMessages={genMessages}
+          onGenerate={handleGenerateRule}
+        />
+      )}
+    </div>
+  );
+}
+
+function AgentCard({ rule, onClick, onDelete, onToggle }: { rule: Rule; onClick: () => void; onDelete: () => void; onToggle: () => void }) {
+  const statusColors = {
+    active: 'bg-emerald-500',
+    draft: 'bg-amber-500',
+    disabled: 'bg-zinc-500',
+  };
+
+  const statusLabels = {
+    active: '运行中',
+    draft: '草稿',
+    disabled: '已停用',
+  };
+
+  const triggerLabels = {
+    manual: '手动',
+    cron: '定时',
+    webhook: 'Webhook',
+  };
+
+  const skillCount = rule.skills?.length || rule.flow?.nodes?.filter((n: FlowNode) => n.type === 'skill').length || 0;
+
+  return (
+    <div
+      className="group relative rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border hover:border-[var(--pc-accent-dim)] transition-all cursor-pointer overflow-hidden"
+      onClick={onClick}
+    >
+      {/* Status indicator */}
+      <div className={`absolute top-4 right-4 w-2 h-2 rounded-full ${statusColors[rule.status]} ${rule.status === 'active' ? 'animate-pulse' : ''}`} />
+      
+      <div className="p-4">
+        {/* Icon + Name */}
+        <div className="flex items-start gap-3 mb-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            rule.status === 'active'
+              ? 'bg-gradient-to-br from-emerald-500/20 to-emerald-500/5'
+              : rule.status === 'draft'
+              ? 'bg-gradient-to-br from-amber-500/20 to-amber-500/5'
+              : 'bg-gradient-to-br from-zinc-500/20 to-zinc-500/5'
+          }`}>
+            <Bot size={18} className={
+              rule.status === 'active' ? 'text-emerald-400' :
+              rule.status === 'draft' ? 'text-amber-400' : 'text-zinc-400'
+            } />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-medium text-pc-text truncate">{rule.name}</h3>
+            <p className="text-xs text-pc-text-muted mt-0.5 line-clamp-2">{rule.description}</p>
+          </div>
+        </div>
+
+        {/* Meta */}
+        <div className="flex items-center gap-3 text-xs text-pc-text-muted mb-3">
+          <span className="flex items-center gap-1">
+            <Clock size={11} />
+            {triggerLabels[rule.triggerType] || rule.triggerType}
+          </span>
+          {skillCount > 0 && (
+            <span className="flex items-center gap-1">
+              <Zap size={11} />
+              {skillCount} 个技能
+            </span>
+          )}
+          {rule.runCount > 0 && (
+            <span>运行 {rule.runCount} 次</span>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-between pt-3 border-t border-pc-border/50">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+            rule.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' :
+            rule.status === 'draft' ? 'bg-amber-500/10 text-amber-400' :
+            'bg-zinc-500/10 text-zinc-400'
+          }`}>
+            {statusLabels[rule.status]}
+          </span>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              className="p-1.5 rounded-lg hover:bg-[var(--pc-hover)] text-pc-text-muted hover:text-pc-text transition-colors"
+              title={rule.status === 'active' ? '停用' : '启用'}
+            >
+              {rule.status === 'active' ? <PowerOff size={13} /> : <Power size={13} />}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-1.5 rounded-lg hover:bg-red-500/10 text-pc-text-muted hover:text-red-400 transition-colors"
+              title="删除"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateModal({ onClose, description, setDescription, isGenerating, genMessages, onGenerate }: {
+  onClose: () => void;
+  description: string;
+  setDescription: (v: string) => void;
+  isGenerating: boolean;
+  genMessages: GenerationMessage[];
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+      <div className="w-full max-w-2xl max-h-[80vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 px-6 py-4 border-b border-pc-border">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-pc-text">创建智能体</h2>
+              <p className="text-xs text-pc-text-muted mt-0.5">用自然语言描述需求，AI 自动编排流程</p>
+            </div>
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="例如：当有新订单时，自动检查库存，如果库存不足则发送提醒通知采购部门..."
+            className="w-full h-32 p-4 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-sm"
+          />
+          {isGenerating && genMessages.length > 0 && (
+            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-48 overflow-y-auto">
+              <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
+                <Loader2 size={14} className="animate-spin text-pc-accent" />
+                <span>生成中...</span>
               </div>
-            ) : rulesError ? (
-              <div className="text-center py-12">
-                <p className="text-sm text-red-400 mb-3">{rulesError}</p>
-                <button onClick={fetchRules} className="px-4 py-2 rounded-lg text-sm bg-[var(--pc-accent-glow)] text-pc-accent hover:opacity-80 transition-colors">重试</button>
-              </div>
-            ) : displayedRules.length === 0 ? (
-              <div className="text-center py-12 text-pc-text-muted">暂无规则，请先创建</div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {displayedRules.map((rule) => (
-                  <div key={rule.id} onClick={() => setSelectedRule(rule)} className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border hover:border-[var(--pc-accent-dim)] transition-colors cursor-pointer">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="text-sm font-medium text-pc-text">{rule.name}</h3>
-                        <p className="text-xs text-pc-text-muted mt-1">{rule.description}</p>
+              <div className="space-y-1.5">
+                {genMessages.map((msg) => (
+                  <div key={msg.id} className="text-xs">
+                    {msg.type === 'thinking' && (
+                      <div className="flex items-start gap-2 text-pc-text-muted">
+                        <span>💭</span><span>{msg.content.slice(0, 150)}...</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={(e) => { e.stopPropagation(); handleDeleteRule(rule.id); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-pc-text-muted hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+                    )}
+                    {msg.type === 'tool_use' && (
+                      <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
+                        <Zap size={11} className="text-pc-accent" />
+                        <span className="text-pc-text">调用: {msg.name}</span>
                       </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 text-xs text-pc-text-muted">
-                        <span className="flex items-center gap-1"><Clock size={12} />{rule.triggerType === 'manual' ? '手动触发' : rule.triggerType === 'cron' ? '定时触发' : 'Webhook'}</span>
-                        <span>运行 {rule.runCount} 次</span>
-                        <span>成功率 {rule.successRate}%</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-pc-accent"><span>查看流程</span><ChevronRight size={12} /></div>
-                    </div>
+                    )}
+                    {msg.type === 'text' && (
+                      <div className="text-pc-text-muted">{msg.content.slice(0, 80)}...</div>
+                    )}
                   </div>
                 ))}
               </div>
-            )}
+            </div>
+          )}
+          <div className="mt-4 p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+            <h3 className="text-xs font-medium text-pc-text mb-2">示例</h3>
+            <div className="flex flex-wrap gap-2">
+              {['当有新订单时，自动检查库存并通知仓库备货', '每天早上9点汇总昨日销售数据生成报表', '客户提交工单时，自动识别问题类型并分配给对应部门'].map((example, idx) => (
+                <button key={idx} onClick={() => setDescription(example)} className="text-left px-3 py-1.5 rounded-lg text-xs text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-        {activeTab === 'monitor' && (
-          <div>
-            {monitorLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20 rounded-2xl" />
-                ))}
-              </div>
-            ) : monitorStats ? (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.active}</div><div className="text-sm text-pc-text-muted">活跃规则</div></div>
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.totalExecutions}</div><div className="text-sm text-pc-text-muted">总执行次数</div></div>
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.successRate}%</div><div className="text-sm text-pc-text-muted">成功率</div></div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.total}</div><div className="text-sm text-pc-text-muted">规则总数</div></div>
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.draft}</div><div className="text-sm text-pc-text-muted">草稿</div></div>
-                  <div className="p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border"><div className="text-2xl font-semibold text-pc-text">{monitorStats.disabled}</div><div className="text-sm text-pc-text-muted">已禁用</div></div>
-                </div>
-              </>
+        </div>
+        <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end">
+          <button
+            onClick={onGenerate}
+            disabled={!description.trim() || isGenerating}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
+          >
+            {isGenerating ? (
+              <><div className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin" /><span>生成中...</span></>
             ) : (
-              <div className="text-center py-12 text-pc-text-muted">
-                <p className="mb-3">监控数据暂不可用</p>
-                <button onClick={fetchMonitorStats} className="px-4 py-2 rounded-lg text-sm bg-[var(--pc-accent-glow)] text-pc-accent hover:opacity-80 transition-colors">刷新</button>
-              </div>
+              <><span>✨</span><span>生成智能体</span></>
             )}
-          </div>
-        )}
-      </main>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
