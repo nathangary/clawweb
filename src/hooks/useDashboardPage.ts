@@ -151,6 +151,19 @@ export function useDashboardPage(apiClient: NanobotApiClient | null) {
     }
   }, [apiClient]);
 
+  const toggleCronJob = useCallback(async (jobId: string, enabled: boolean) => {
+    if (!apiClient) return false;
+    try {
+      setData(prev => ({
+        ...prev,
+        cronJobs: prev.cronJobs.map(j => j.id === jobId ? { ...j, enabled } : j),
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiClient]);
+
   const deleteCronJob = useCallback(async (jobId: string) => {
     if (!apiClient) return false;
     try {
@@ -174,5 +187,5 @@ export function useDashboardPage(apiClient: NanobotApiClient | null) {
     }
   }, [apiClient, fetchAll, fetchHealth]);
 
-  return { data, fetchAll, fetchHealth, fetchCronLogs, toggleSkill, reloadConfig, addCronJob, deleteCronJob };
+  return { data, fetchAll, fetchHealth, fetchCronLogs, toggleSkill, toggleCronJob, reloadConfig, addCronJob, deleteCronJob };
 }

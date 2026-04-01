@@ -29,7 +29,7 @@ const navItems: NavItem[] = [
 ];
 
 export function DashboardPage({ apiClient, onClose }: Props) {
-  const { data, fetchAll, fetchCronLogs, toggleSkill, reloadConfig, addCronJob, deleteCronJob } = useDashboardPage(apiClient);
+  const { data, fetchAll, fetchCronLogs, toggleSkill, toggleCronJob, reloadConfig, addCronJob, deleteCronJob } = useDashboardPage(apiClient);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [reloading, setReloading] = useState(false);
 
@@ -169,9 +169,9 @@ export function DashboardPage({ apiClient, onClose }: Props) {
                 <DashboardTasks
                   jobs={data.cronJobs}
                   logs={data.cronLogs}
-                  onAdd={addCronJob}
                   onDelete={deleteCronJob}
                   onFetchLogs={fetchCronLogs}
+                  onToggle={toggleCronJob}
                 />
               )}
             </>
