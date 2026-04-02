@@ -331,7 +331,11 @@ export function useGateway() {
     activeSessionRef.current = key;
     setMessages([]);
     loadHistory(key);
-  }, [loadHistory]);
+    if (key.startsWith('transport:')) {
+      const chatId = key.replace('transport:', '');
+      getClient()?.setChatId(chatId);
+    }
+  }, [loadHistory, getClient]);
 
   const createNewSession = useCallback(async () => {
     const newChatId = `web-${Date.now()}`;

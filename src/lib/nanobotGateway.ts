@@ -50,16 +50,20 @@ export class NanobotGatewayClient {
   private clientId: string;
   private chatId: string;
 
-  constructor(wsUrl?: string, authToken?: string, clientId?: string) {
+  constructor(wsUrl?: string, authToken?: string, clientId?: string, chatId?: string) {
     this.wsUrl = wsUrl || `ws://${window.location.hostname}:8787/ws`;
     this.authToken = authToken || '';
     this.clientId = clientId || 'webchat';
-    this.chatId = `web-${Date.now()}`;
+    this.chatId = chatId || `web-${Date.now()}`;
   }
 
   setCredentials(wsUrl: string, authToken?: string) {
     this.wsUrl = wsUrl;
     if (authToken !== undefined) this.authToken = authToken;
+  }
+
+  setChatId(chatId: string) {
+    this.chatId = chatId;
   }
 
   onStatus(fn: NanobotStatusHandler) {
