@@ -29,6 +29,16 @@ function categoryColor(category: string) {
   }
 }
 
+function categoryLabel(category: string): string {
+  switch (category) {
+    case 'images': return '图片';
+    case 'video': return '视频';
+    case 'media': return '媒体';
+    case 'htmls': return '网页';
+    default: return category;
+  }
+}
+
 function getFileType(asset: AssetItem): 'markdown' | 'html' | 'image' | 'video' | 'other' {
   const ext = asset.ext.toLowerCase();
   if (ext === 'html' || ext === 'htm') return 'html';
@@ -75,31 +85,37 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
     return parseHeaders(fileContent);
   }, [fileContent, selectedFile]);
 
+  const loadAssets = useCallback(async (category?: string, query?: string) => {
+    setLoading(true);
+    try {
+      const params: Record<string, unknown> = { page: 1, page_size: 200, sort: 'desc' };
+      if (category && category !== 'all') params.category = category;
+      if (query) params.q = query;
+      const res = await apiClient.getAssets(params);
+      if (res.applied) setAssets(res.data.items);
+    } catch (error) {
+      console.error('Failed to load assets:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiClient]);
+
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [catsRes, assetsRes] = await Promise.all([
-          apiClient.getAssetCategories(),
-          apiClient.getAssets({ page: 1, page_size: 200, sort: 'desc' }),
-        ]);
+        const catsRes = await apiClient.getAssetCategories();
         if (catsRes.applied) setCategories(catsRes.data.categories);
-        if (assetsRes.applied) setAssets(assetsRes.data.items);
       } catch (error) {
-        console.error('Failed to load assets:', error);
-      } finally {
-        setLoading(false);
+        console.error('Failed to load categories:', error);
       }
     };
     loadData();
-  }, [apiClient]);
+    loadAssets();
+  }, [apiClient, loadAssets]);
 
-  const filteredAssets = useMemo(() => {
-    return assets.filter((asset) => {
-      const matchSearch = !searchQuery || asset.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchCategory = categoryFilter === 'all' || asset.category === categoryFilter;
-      return matchSearch && matchCategory;
-    });
-  }, [assets, searchQuery, categoryFilter]);
+  useEffect(() => {
+    loadAssets(categoryFilter, searchQuery || undefined);
+  }, [categoryFilter, searchQuery, loadAssets]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -301,10 +317,10 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
               >
                 <option value="all">全部类型</option>
                 {categories.map(cat => (
-                  <option key={cat.name} value={cat.name}>{cat.name}</option>
+                  <option key={cat.name} value={cat.name}>{categoryLabel(cat.name)}</option>
                 ))}
               </select>
-              <span className="text-xs text-pc-text-muted">{filteredAssets.length} 个文件</span>
+              <span className="text-xs text-pc-text-muted">{assets.length} 个文件</span>
             </div>
           </div>
         </header>
@@ -317,7 +333,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
               </div>
               <p className="text-sm text-pc-text-secondary font-medium">加载中...</p>
             </div>
-          ) : filteredAssets.length === 0 ? (
+          ) : assets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
               <div className="w-12 h-12 rounded-xl bg-[var(--pc-hover)] flex items-center justify-center mb-3">
                 <FolderOpen size={24} className="text-pc-text-muted" />
@@ -327,7 +343,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
             </div>
           ) : (
             <div className="p-2 space-y-1">
-              {filteredAssets.map((asset) => (
+              {assets.map((asset: AssetItem) => (
                   <button
                     key={asset.id}
                     onClick={() => handleSelectFile(asset)}
