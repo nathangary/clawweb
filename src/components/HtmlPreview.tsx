@@ -3,11 +3,12 @@ import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import { getStoredCredentials } from '../lib/credentials';
 
 interface HtmlPreviewProps {
-  filePath: string;
+  filePath?: string;
+  assetId?: string;
   fullHeight?: boolean;
 }
 
-export function HtmlPreview({ filePath, fullHeight = false }: HtmlPreviewProps) {
+export function HtmlPreview({ filePath, assetId, fullHeight = false }: HtmlPreviewProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,20 +18,34 @@ export function HtmlPreview({ filePath, fullHeight = false }: HtmlPreviewProps) 
     setLoading(true);
     setError(null);
     try {
-      const fileName = filePath.split('/').pop() || 'chart.html';
-      const relativePath = filePath.includes('.nanobot/workspace/') 
-        ? filePath.split('.nanobot/workspace/')[1] 
-        : fileName;
       const creds = getStoredCredentials();
       const headers: Record<string, string> = {};
       if (creds?.token) {
         headers['Authorization'] = `Bearer ${creds.token}`;
       }
-      const response = await fetch(`/api/v1/files/${encodeURIComponent(relativePath)}`, { headers });
-      if (!response.ok) {
-        throw new Error('File not found');
+
+      let content: string;
+      
+      if (assetId) {
+        const response = await fetch(`/api/v1/admin/assets/${assetId}/download`, { headers });
+        if (!response.ok) {
+          throw new Error('Asset not found');
+        }
+        content = await response.text();
+      } else if (filePath) {
+        const fileName = filePath.split('/').pop() || 'chart.html';
+        const relativePath = filePath.includes('.nanobot/workspace/') 
+          ? filePath.split('.nanobot/workspace/')[1] 
+          : fileName;
+        const response = await fetch(`/api/v1/files/${encodeURIComponent(relativePath)}`, { headers });
+        if (!response.ok) {
+          throw new Error('File not found');
+        }
+        content = await response.text();
+      } else {
+        throw new Error('No file path or asset ID provided');
       }
-      const content = await response.text();
+
       const blob = new Blob([content], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       setSrc(url);
@@ -48,7 +63,7 @@ export function HtmlPreview({ filePath, fullHeight = false }: HtmlPreviewProps) 
         URL.revokeObjectURL(src);
       }
     };
-  }, [filePath]);
+  }, [filePath, assetId]);
 
   if (error) {
     return (
@@ -71,7 +86,7 @@ export function HtmlPreview({ filePath, fullHeight = false }: HtmlPreviewProps) 
         <div className="flex items-center justify-between px-3 py-2 bg-[var(--pc-bg-surface)] border-b border-pc-border">
           <div className="flex items-center gap-2">
             <span className="text-xs text-pc-text-muted">HTML Preview</span>
-            <span className="text-xs text-pc-text-faint truncate max-w-[200px]">{filePath.split('/').pop()}</span>
+            <span className="text-xs text-pc-text-faint truncate max-w-[200px]">{(filePath || assetId || 'HTML').split('/').pop()}</span>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -127,4 +142,24 @@ export function extractHtmlPath(content: string): string | null {
     }
   }
   return null;
+}
+
+export interface HtmlDocumentInfo {
+  assetId: string;
+  url?: string;
+  fileName: string;
+  mimeType?: string;
+}
+
+export function extractHtmlDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): HtmlDocumentInfo[] {
+  if (!multimodalResponse?.media) return [];
+  
+  return multimodalResponse.media
+    .filter(m => m.type === 'document' && m.mime_type === 'text/html' && m.asset_id)
+    .map(m => ({
+      assetId: m.asset_id!,
+      url: m.url,
+      fileName: m.url ? m.url.split('/').pop() || 'document.html' : 'document.html',
+      mimeType: m.mime_type,
+    }));
 }

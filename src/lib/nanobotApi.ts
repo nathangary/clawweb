@@ -13,11 +13,26 @@ export interface NanobotSession {
   messageCount?: number;
 }
 
+export interface NanobotMediaItem {
+  type: string;
+  source: string;
+  url?: string;
+  asset_id?: string;
+  mime_type?: string;
+}
+
+export interface NanobotMultimodalResponse {
+  format: string;
+  content: string;
+  media?: NanobotMediaItem[];
+}
+
 export interface NanobotMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
   media?: string[];
+  multimodal_response?: NanobotMultimodalResponse;
 }
 
 export interface NanobotHistoryItem {
@@ -290,7 +305,7 @@ export class NanobotApiClient {
     total: number;
     sort: string;
   }>> {
-    return this.request(`/v1/admin/sessions/${encodeURIComponent(sessionKey)}/history?page=${page}&page_size=${pageSize}&sort=${sort}`);
+    return this.request(`/v1/admin/sessions/${encodeURIComponent(sessionKey)}?page=${page}&page_size=${pageSize}&sort=${sort}`);
   }
 
   async getHistory(page = 1, pageSize = 20, fromTs?: string, toTs?: string): Promise<NanobotApiResponse<{

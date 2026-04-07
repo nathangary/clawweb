@@ -8,15 +8,11 @@ export interface ChatMessage {
   runId?: string;
   isSystemEvent?: boolean;
   metadata?: Record<string, unknown>;
-  /** Optimistic send status for user messages */
+  multimodalResponse?: MultimodalResponse;
   sendStatus?: 'sending' | 'sent' | 'error';
-  /** Timestamp (ms) when streaming started for this message */
   streamStartedAt?: number;
-  /** Total generation time in milliseconds (set when streaming ends) */
   generationTimeMs?: number;
-  /** True if this message was restored from local cache (pre-compaction) */
   isArchived?: boolean;
-  /** True if this is a visual separator showing where compaction occurred */
   isCompactionSeparator?: boolean;
 }
 
@@ -26,6 +22,20 @@ export type MessageBlock =
   | { type: 'tool_use'; name: string; input: Record<string, unknown>; id?: string }
   | { type: 'tool_result'; content: string; toolUseId?: string; name?: string }
   | { type: 'image'; mediaType: string; data?: string; url?: string };
+
+export interface MultimodalMedia {
+  type: string;
+  source: string;
+  url?: string;
+  asset_id?: string;
+  mime_type?: string;
+}
+
+export interface MultimodalResponse {
+  format: string;
+  content: string;
+  media?: MultimodalMedia[];
+}
 
 export interface Session {
   key: string;

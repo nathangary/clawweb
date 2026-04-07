@@ -264,6 +264,7 @@ export function useGateway() {
             content: m.content,
             timestamp: new Date(m.timestamp).getTime(),
             blocks,
+            multimodalResponse: m.multimodal_response,
           };
         });
         setMessages(msgs);
