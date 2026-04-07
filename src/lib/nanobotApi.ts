@@ -132,6 +132,32 @@ export interface Rule {
   systemPrompt: string;
 }
 
+export interface AssetCategory {
+  name: string;
+  directory: string;
+  scenarios: string[];
+  allowed_exts: string[];
+}
+
+export interface AssetItem {
+  id: string;
+  name: string;
+  original_name?: string;
+  category: string;
+  scene?: string;
+  subject?: string;
+  type?: string;
+  version?: number;
+  ext: string;
+  mime_type?: string;
+  size_bytes: number;
+  checksum_sha256?: string;
+  relative_path: string;
+  download_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ServiceHealth {
   name: string;
   status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
@@ -370,6 +396,53 @@ export class NanobotApiClient {
     successRate: number;
   }>> {
     return this.request('/v1/admin/rules/stats');
+  }
+
+  async getAssetCategories(): Promise<NanobotApiResponse<{ categories: AssetCategory[] }>> {
+    return this.request('/v1/admin/assets/categories');
+  }
+
+  async getAssets(params: {
+    category?: string;
+    scene?: string;
+    ext?: string;
+    q?: string;
+    from_ts?: string;
+    to_ts?: string;
+    page?: number;
+    page_size?: number;
+    sort?: 'asc' | 'desc';
+  } = {}): Promise<NanobotApiResponse<{
+    items: AssetItem[];
+    page: number;
+    page_size: number;
+    total: number;
+    sort: string;
+  }>> {
+    const qs = new URLSearchParams();
+    if (params.category) qs.set('category', params.category);
+    if (params.scene) qs.set('scene', params.scene);
+    if (params.ext) qs.set('ext', params.ext);
+    if (params.q) qs.set('q', params.q);
+    if (params.from_ts) qs.set('from_ts', params.from_ts);
+    if (params.to_ts) qs.set('to_ts', params.to_ts);
+    qs.set('page', String(params.page ?? 1));
+    qs.set('page_size', String(params.page_size ?? 20));
+    qs.set('sort', params.sort ?? 'desc');
+    return this.request(`/v1/admin/assets?${qs.toString()}`);
+  }
+
+  async downloadAsset(assetId: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const url = `${this.baseUrl.replace(/\/$/, '')}/v1/admin/assets/${encodeURIComponent(assetId)}/download`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new ApiError(`Download failed: ${response.status}`, response.status, url);
+    return response.blob();
+  }
+
+  async deleteAsset(assetId: string): Promise<NanobotApiResponse<{ asset_id: string }>> {
+    return this.request(`/v1/admin/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' });
   }
 
   async healthCheck(): Promise<HealthReport> {

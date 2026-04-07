@@ -13,6 +13,7 @@ import { DashboardPage } from './components/Dashboard/DashboardPage';
 import { SkillHubPage } from './components/SkillHub/SkillHubPage';
 import { AgentOrchestratorPage } from './components/AgentOrchestrator/AgentOrchestratorPage';
 import { HistoryFilesPage } from './components/HistoryFiles/HistoryFilesPage';
+import { TasksPage } from './components/Tasks/TasksPage';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from './lib/sessionName';
 import { X } from 'lucide-react';
 import { useT } from './hooks/useLocale';
@@ -45,6 +46,7 @@ export default function App() {
   const [skillHubOpen, setSkillHubOpen] = useState(false);
   const [agentOrchestratorOpen, setAgentOrchestratorOpen] = useState(false);
   const [historyFilesOpen, setHistoryFilesOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
   const secondary = useSecondarySession(getClient, splitSession);
@@ -109,6 +111,9 @@ export default function App() {
     if (e.key === 'Escape' && skillHubOpen) {
       setSkillHubOpen(false);
     }
+    if (e.key === 'Escape' && tasksOpen) {
+      setTasksOpen(false);
+    }
     if (e.key === '?' && !shortcutsOpen) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
@@ -125,7 +130,7 @@ export default function App() {
         : (idx + 1) % sessions.length;
       switchSession(sessions[next].key);
     }
-  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen, skillHubOpen]);
+  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen, skillHubOpen, tasksOpen]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -168,6 +173,7 @@ export default function App() {
         onOpenSkillHub={() => setSkillHubOpen(true)}
         onOpenAgentOrchestrator={() => setAgentOrchestratorOpen(true)}
         onOpenHistoryFiles={() => setHistoryFilesOpen(true)}
+        onOpenTasks={() => setTasksOpen(true)}
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
@@ -212,6 +218,8 @@ export default function App() {
         <DashboardPage
           apiClient={getApiClient()}
           onClose={() => setDashboardOpen(false)}
+          onOpenSkillMarket={() => { setDashboardOpen(false); setSkillHubOpen(true); }}
+          onOpenTasks={() => { setDashboardOpen(false); setTasksOpen(true); }}
         />
       </ErrorBoundary>
     )}
@@ -227,9 +235,14 @@ export default function App() {
         <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} getClient={getClient} getApiClient={getApiClient} />
       </ErrorBoundary>
     )}
-    {historyFilesOpen && (
+    {historyFilesOpen && getApiClient() && (
       <ErrorBoundary>
-        <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} />
+        <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} apiClient={getApiClient()!} />
+      </ErrorBoundary>
+    )}
+    {tasksOpen && (
+      <ErrorBoundary>
+        <TasksPage apiClient={getApiClient()} onClose={() => setTasksOpen(false)} />
       </ErrorBoundary>
     )}
     </>

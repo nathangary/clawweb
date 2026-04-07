@@ -1,31 +1,42 @@
-import { useState, useMemo, useEffect } from 'react';
-import { X, Search, FileText, Download, Copy, Clock, FolderOpen, ChevronRight } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { X, Search, FileText, Download, Trash2, Clock, FolderOpen, ChevronRight, Image, Video, FileArchive, Globe } from 'lucide-react';
 import { LazyMarkdown } from '../LazyMarkdown';
-import { HtmlPreview } from '../HtmlPreview';
-
-interface GeneratedFile {
-  id: string;
-  name: string;
-  type: 'markdown' | 'html' | 'other';
-  content: string;
-  size: number;
-  sessionId: string;
-  sessionName: string;
-  createdAt: string;
-}
+import type { AssetItem, AssetCategory } from '../../lib/nanobotApi';
+import type { NanobotApiClient } from '../../lib/nanobotApi';
 
 interface Props {
   onClose: () => void;
+  apiClient: NanobotApiClient;
 }
 
-const DOC_FILES = [
-  { name: 'DASHBOARD_DESIGN.md', sessionName: 'Dashboard 设计讨论' },
-  { name: 'NANOBOT_ADAPTER.md', sessionName: 'Nanobot 适配器开发' },
-  { name: 'NANOBOT_COMPLETION.md', sessionName: 'Nanobot 补全功能' },
-  { name: 'TODO-CronJob-API.md', sessionName: '定时任务 API 开发' },
-  { name: '智能体群管理平台 PRD.md', sessionName: '智能体编排 PRD' },
-  { name: '历史文件查看器 PRD.md', sessionName: '历史文件 PRD' },
-];
+function categoryIcon(category: string, size = 14) {
+  switch (category) {
+    case 'images': return <Image size={size} />;
+    case 'video': return <Video size={size} />;
+    case 'media': return <FileArchive size={size} />;
+    case 'htmls': return <Globe size={size} />;
+    default: return <FileText size={size} />;
+  }
+}
+
+function categoryColor(category: string) {
+  switch (category) {
+    case 'images': return 'text-blue-400 bg-blue-500/15';
+    case 'video': return 'text-purple-400 bg-purple-500/15';
+    case 'media': return 'text-orange-400 bg-orange-500/15';
+    case 'htmls': return 'text-emerald-400 bg-emerald-500/15';
+    default: return 'text-zinc-400 bg-zinc-500/15';
+  }
+}
+
+function getFileType(asset: AssetItem): 'markdown' | 'html' | 'image' | 'video' | 'other' {
+  const ext = asset.ext.toLowerCase();
+  if (ext === 'html' || ext === 'htm') return 'html';
+  if (ext === 'md' || ext === 'txt') return 'markdown';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
+  if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'video';
+  return 'other';
+}
 
 interface Header {
   level: number;
@@ -48,55 +59,47 @@ function parseHeaders(content: string): Header[] {
   return headers;
 }
 
-export function HistoryFilesPage({ onClose }: Props) {
+export function HistoryFilesPage({ onClose, apiClient }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'markdown' | 'other'>('all');
-  const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
-  const [files, setFiles] = useState<GeneratedFile[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [selectedFile, setSelectedFile] = useState<AssetItem | null>(null);
+  const [assets, setAssets] = useState<AssetItem[]>([]);
+  const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [htmlSrc, setHtmlSrc] = useState<string | null>(null);
 
   const headers = useMemo(() => {
-    if (selectedFile?.type !== 'markdown') return [];
-    return parseHeaders(selectedFile.content);
-  }, [selectedFile]);
+    if (!fileContent || getFileType(selectedFile!) !== 'markdown') return [];
+    return parseHeaders(fileContent);
+  }, [fileContent, selectedFile]);
 
   useEffect(() => {
-    const loadFiles = async () => {
+    const loadData = async () => {
       try {
-        const loadedFiles: GeneratedFile[] = await Promise.all(
-          DOC_FILES.map(async (file) => {
-            const response = await fetch(`/doc/${file.name}`);
-            const content = await response.text();
-            const isHtml = file.name.endsWith('.html');
-            return {
-              id: file.name,
-              name: file.name,
-              type: isHtml ? 'html' : file.name.endsWith('.md') ? 'markdown' : 'other',
-              content: isHtml ? '' : content,
-              size: new Blob([content]).size,
-              sessionId: file.sessionName,
-              sessionName: file.sessionName,
-              createdAt: new Date().toISOString(),
-            };
-          })
-        );
-        setFiles(loadedFiles);
+        const [catsRes, assetsRes] = await Promise.all([
+          apiClient.getAssetCategories(),
+          apiClient.getAssets({ page: 1, page_size: 200, sort: 'desc' }),
+        ]);
+        if (catsRes.applied) setCategories(catsRes.data.categories);
+        if (assetsRes.applied) setAssets(assetsRes.data.items);
       } catch (error) {
-        console.error('Failed to load files:', error);
+        console.error('Failed to load assets:', error);
       } finally {
         setLoading(false);
       }
     };
-    loadFiles();
-  }, []);
+    loadData();
+  }, [apiClient]);
 
-  const filteredFiles = useMemo(() => {
-    return files.filter((file: GeneratedFile) => {
-      const matchSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchType = typeFilter === 'all' || file.type === typeFilter;
-      return matchSearch && matchType;
+  const filteredAssets = useMemo(() => {
+    return assets.filter((asset) => {
+      const matchSearch = !searchQuery || asset.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchCategory = categoryFilter === 'all' || asset.category === categoryFilter;
+      return matchSearch && matchCategory;
     });
-  }, [files, searchQuery, typeFilter]);
+  }, [assets, searchQuery, categoryFilter]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -121,20 +124,129 @@ export function HistoryFilesPage({ onClose }: Props) {
     }
   };
 
-  const handleCopy = async () => {
-    if (!selectedFile) return;
-    await navigator.clipboard.writeText(selectedFile.content);
+  const handleSelectFile = useCallback(async (asset: AssetItem) => {
+    setSelectedFile(asset);
+    setFileContent(null);
+    if (htmlSrc) { URL.revokeObjectURL(htmlSrc); setHtmlSrc(null); }
+    const fileType = getFileType(asset);
+    if (fileType === 'markdown' || fileType === 'html' || fileType === 'other') {
+      try {
+        const blob = await apiClient.downloadAsset(asset.id);
+        const text = await blob.text();
+        setFileContent(text);
+        if (fileType === 'html') {
+          const injectStyles = `
+<style>
+  html, body { margin: 0; padding: 0; height: 100vh; overflow: auto; }
+  /* Override fixed heights on chart containers */
+  [id*="chart"], [class*="chart"], [id*="echarts"], [class*="echarts"],
+  [id*="canvas"], [class*="canvas"], svg, canvas {
+    width: 100% !important;
+    height: 100vh !important;
+    min-height: 100vh !important;
+  }
+  /* Common chart library containers */
+  .echarts, #echarts, .chart-container, .chart-wrapper,
+  [data-chart], .recharts-wrapper, .recharts-surface {
+    width: 100% !important;
+    height: 100vh !important;
+  }
+</style>`;
+          const injectScript = `
+<script>
+  (function() {
+    function resizeCharts() {
+      if (window.echarts) {
+        document.querySelectorAll('[id*="echarts"], [class*="echarts"]').forEach(function(el) {
+          var instance = echarts.getInstanceByDom(el);
+          if (instance) instance.resize();
+        });
+      }
+      if (window.Chart) {
+        Object.values(Chart.instances || {}).forEach(function(chart) {
+          chart.resize();
+        });
+      }
+      window.dispatchEvent(new Event('resize'));
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { setTimeout(resizeCharts, 300); });
+    } else {
+      setTimeout(resizeCharts, 300);
+    }
+    window.addEventListener('resize', resizeCharts);
+  })();
+</script>`;
+          let modifiedHtml = text;
+          if (modifiedHtml.includes('</head>')) {
+            modifiedHtml = modifiedHtml.replace('</head>', injectStyles + '</head>');
+          } else {
+            modifiedHtml = injectStyles + modifiedHtml;
+          }
+          if (modifiedHtml.includes('</body>')) {
+            modifiedHtml = modifiedHtml.replace('</body>', injectScript + '</body>');
+          } else {
+            modifiedHtml = modifiedHtml + injectScript;
+          }
+          const htmlBlob = new Blob([modifiedHtml], { type: 'text/html' });
+          setHtmlSrc(URL.createObjectURL(htmlBlob));
+        }
+      } catch (error) {
+        console.error('Failed to load file content:', error);
+        setFileContent('加载文件内容失败');
+      }
+    }
+  }, [apiClient, htmlSrc]);
+
+  const handleDownload = async () => {
+    if (!selectedFile || downloading) return;
+    setDownloading(true);
+    try {
+      const blob = await apiClient.downloadAsset(selectedFile.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = selectedFile.name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+    } finally {
+      setDownloading(false);
+    }
   };
 
-  const handleDownload = () => {
+  const handleDelete = async () => {
     if (!selectedFile) return;
-    const blob = new Blob([selectedFile.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = selectedFile.name;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!confirm(`确定删除 "${selectedFile.name}" 吗？`)) return;
+    try {
+      const res = await apiClient.deleteAsset(selectedFile.id);
+      if (res.applied) {
+        setAssets(prev => prev.filter(a => a.id !== selectedFile.id));
+        setSelectedFile(null);
+        setFileContent(null);
+      }
+    } catch (error) {
+      console.error('Delete failed:', error);
+    }
+  };
+
+  const handleDeleteAsset = async (assetId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset || !confirm(`确定删除 "${asset.name}" 吗？`)) return;
+    try {
+      const res = await apiClient.deleteAsset(assetId);
+      if (res.applied) {
+        setAssets(prev => prev.filter(a => a.id !== assetId));
+        if (selectedFile?.id === assetId) {
+          setSelectedFile(null);
+          setFileContent(null);
+        }
+      }
+    } catch (error) {
+      console.error('Delete failed:', error);
+    }
   };
 
   return (
@@ -150,7 +262,7 @@ export function HistoryFilesPage({ onClose }: Props) {
                 </div>
               </div>
               <div>
-                <h1 className="font-semibold text-pc-text text-sm">历史文件</h1>
+                <h1 className="font-semibold text-pc-text text-sm">我的文件</h1>
                 <p className="text-[10px] text-pc-text-muted">查看对话生成的文件</p>
               </div>
             </div>
@@ -183,16 +295,16 @@ export function HistoryFilesPage({ onClose }: Props) {
             </div>
             <div className="flex items-center gap-2 mt-2">
               <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
                 className="flex-1 bg-[var(--pc-bg-surface)] text-xs text-pc-text-secondary rounded-lg px-2 py-1.5 border border-pc-border outline-none cursor-pointer"
               >
                 <option value="all">全部类型</option>
-                <option value="markdown">Markdown</option>
-                <option value="html">HTML</option>
-                <option value="other">其他文件</option>
+                {categories.map(cat => (
+                  <option key={cat.name} value={cat.name}>{cat.name}</option>
+                ))}
               </select>
-              <span className="text-xs text-pc-text-muted">{filteredFiles.length} 个文件</span>
+              <span className="text-xs text-pc-text-muted">{filteredAssets.length} 个文件</span>
             </div>
           </div>
         </header>
@@ -205,7 +317,7 @@ export function HistoryFilesPage({ onClose }: Props) {
               </div>
               <p className="text-sm text-pc-text-secondary font-medium">加载中...</p>
             </div>
-          ) : filteredFiles.length === 0 ? (
+          ) : filteredAssets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
               <div className="w-12 h-12 rounded-xl bg-[var(--pc-hover)] flex items-center justify-center mb-3">
                 <FolderOpen size={24} className="text-pc-text-muted" />
@@ -215,36 +327,43 @@ export function HistoryFilesPage({ onClose }: Props) {
             </div>
           ) : (
             <div className="p-2 space-y-1">
-              {filteredFiles.map((file) => (
-                <button
-                  key={file.id}
-                  onClick={() => setSelectedFile(file)}
-                  className={`w-full p-3 rounded-xl text-left transition-all ${
-                    selectedFile?.id === file.id
-                      ? 'bg-[var(--pc-accent-glow)] border border-[var(--pc-accent-dim)]'
-                      : 'bg-transparent border border-transparent hover:bg-[var(--pc-hover)]'
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      file.type === 'markdown' ? 'bg-blue-500/15' : file.type === 'html' ? 'bg-emerald-500/15' : 'bg-zinc-500/15'
-                    }`}>
-                      <FileText size={14} className={file.type === 'markdown' ? 'text-blue-400' : file.type === 'html' ? 'text-emerald-400' : 'text-zinc-400'} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-pc-text font-medium truncate">{file.name}</div>
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-pc-text-muted">
-                        <span className="flex items-center gap-0.5">
-                          <Clock size={10} />
-                          {formatTime(file.createdAt)}
-                        </span>
-                        <span>•</span>
-                        <span className="truncate max-w-[100px]">{file.sessionName}</span>
+              {filteredAssets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    onClick={() => handleSelectFile(asset)}
+                    className={`w-full p-3 rounded-xl text-left transition-all relative ${
+                      selectedFile?.id === asset.id
+                        ? 'bg-[var(--pc-accent-glow)] border border-[var(--pc-accent-dim)]'
+                        : 'bg-transparent border border-transparent hover:bg-[var(--pc-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${categoryColor(asset.category)}`}>
+                        {categoryIcon(asset.category)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-pc-text font-medium truncate">{asset.name}</div>
+                        <div className="flex items-center gap-2 mt-1 text-[10px] text-pc-text-muted">
+                          <span className="flex items-center gap-0.5">
+                            <Clock size={10} />
+                            {formatTime(asset.created_at)}
+                          </span>
+                          <span>•</span>
+                          <span className="uppercase">{asset.ext}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[10px] text-pc-text-muted">{formatSize(asset.size_bytes)}</span>
+                        <button
+                          onClick={(e) => handleDeleteAsset(asset.id, e)}
+                          className="p-1 rounded-lg text-pc-text-faint opacity-0 hover:opacity-100 hover:text-red-400 transition-all"
+                          title="删除"
+                        >
+                          <Trash2 size={10} />
+                        </button>
                       </div>
                     </div>
-                    <span className="text-[10px] text-pc-text-muted shrink-0">{formatSize(file.size)}</span>
-                  </div>
-                </button>
+                  </button>
               ))}
             </div>
           )}
@@ -255,26 +374,29 @@ export function HistoryFilesPage({ onClose }: Props) {
         <div className="flex-1 flex flex-col bg-[var(--pc-bg-surface)]">
           <div className="shrink-0 flex items-center justify-between px-4 h-14 border-b border-pc-border">
             <div className="flex items-center gap-2 min-w-0">
-              <FileText size={16} className="text-pc-accent shrink-0" />
+              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${categoryColor(selectedFile.category)}`}>
+                {categoryIcon(selectedFile.category, 14)}
+              </div>
               <span className="text-sm font-medium text-pc-text truncate">{selectedFile.name}</span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors"
-              >
-                <Copy size={12} />
-                复制
-              </button>
-              <button
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors"
+                disabled={downloading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors disabled:opacity-50"
               >
                 <Download size={12} />
-                下载
+                {downloading ? '下载中...' : '下载'}
               </button>
               <button
-                onClick={() => setSelectedFile(null)}
+                onClick={handleDelete}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <Trash2 size={12} />
+                删除
+              </button>
+              <button
+                onClick={() => { setSelectedFile(null); setFileContent(null); if (htmlSrc) { URL.revokeObjectURL(htmlSrc); setHtmlSrc(null); } }}
                 className="p-1.5 rounded-lg text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors"
               >
                 <X size={16} />
@@ -282,8 +404,8 @@ export function HistoryFilesPage({ onClose }: Props) {
             </div>
           </div>
 
-          <div className="flex-1 flex overflow-hidden">
-            {selectedFile.type === 'markdown' && headers.length > 0 && (
+          <div className="flex-1 flex overflow-hidden min-h-0">
+            {getFileType(selectedFile) === 'markdown' && headers.length > 0 && (
               <div className="w-48 shrink-0 overflow-y-auto border-r border-pc-border p-4 space-y-2">
                 <h3 className="text-xs font-semibold text-pc-text-muted mb-3 uppercase tracking-wider">目录</h3>
                 {headers.map((h, i) => (
@@ -298,26 +420,46 @@ export function HistoryFilesPage({ onClose }: Props) {
                 ))}
               </div>
             )}
-            
-            <div className={`flex-1 ${selectedFile.type === 'html' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-              {selectedFile.type === 'markdown' ? (
+            <div className={`flex-1 min-w-0 min-h-0 relative ${getFileType(selectedFile) === 'html' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+              {getFileType(selectedFile) === 'markdown' ? (
                 <div className="h-full w-full p-4 overflow-y-auto">
-                <article className="prose prose-sm dark:prose-invert max-w-none">
-                  <LazyMarkdown components={{
-                    h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                    h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                    h3: ({ node, ...props }) => <h3 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                    h4: ({ node, ...props }) => <h4 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                    h5: ({ node, ...props }) => <h5 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                    h6: ({ node, ...props }) => <h6 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
-                  }}>{selectedFile.content}</LazyMarkdown>
-                </article>
+                  <article className="prose prose-sm dark:prose-invert max-w-none">
+                    <LazyMarkdown components={{
+                      h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                      h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                      h3: ({ node, ...props }) => <h3 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                      h4: ({ node, ...props }) => <h4 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                      h5: ({ node, ...props }) => <h5 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                      h6: ({ node, ...props }) => <h6 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
+                    }}>{fileContent || ''}</LazyMarkdown>
+                  </article>
                 </div>
-              ) : selectedFile.type === 'html' ? (
-                <HtmlPreview filePath={selectedFile.name} fullHeight={true} />
+              ) : getFileType(selectedFile) === 'html' ? (
+                <iframe
+                  src={htmlSrc || undefined}
+                  className="absolute inset-0 w-full h-full border-0 bg-white"
+                  sandbox="allow-scripts"
+                  title={selectedFile.name}
+                />
+              ) : getFileType(selectedFile) === 'image' ? (
+                <div className="flex items-center justify-center h-full p-4">
+                  <img
+                    src={`${apiClient.getBaseUrl().replace('/api', '')}/v1/admin/assets/${selectedFile.id}/download`}
+                    alt={selectedFile.name}
+                    className="max-w-full max-h-full object-contain rounded-xl"
+                  />
+                </div>
+              ) : getFileType(selectedFile) === 'video' ? (
+                <div className="flex items-center justify-center h-full p-4">
+                  <video
+                    controls
+                    className="max-w-full max-h-full rounded-xl"
+                    src={`${apiClient.getBaseUrl().replace('/api', '')}/v1/admin/assets/${selectedFile.id}/download`}
+                  />
+                </div>
               ) : (
                 <pre className="text-xs text-pc-text-muted whitespace-pre-wrap font-mono bg-[var(--pc-bg-base)] p-4 rounded-xl border border-pc-border">
-                  {selectedFile.content}
+                  {fileContent || '无法预览此文件类型'}
                 </pre>
               )}
             </div>

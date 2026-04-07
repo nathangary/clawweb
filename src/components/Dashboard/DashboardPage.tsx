@@ -1,19 +1,20 @@
 import { useState } from 'react';
-import { Activity, Brain, Radio, Target, Settings, RefreshCw, Loader2 } from 'lucide-react';
+import { Activity, Brain, Radio, Settings, RefreshCw, Loader2 } from 'lucide-react';
 import { useDashboardPage } from '../../hooks/useDashboardPage';
 import { DashboardOverview } from './DashboardOverview';
 import { DashboardSkills } from './DashboardSkills';
 import { DashboardChannels } from './DashboardChannels';
-import { DashboardTasks } from './DashboardTasks';
 import { Skeleton } from '../Skeleton';
 import type { NanobotApiClient } from '../../lib/nanobotApi';
 
 interface Props {
   apiClient: NanobotApiClient | null;
   onClose: () => void;
+  onOpenSkillMarket?: () => void;
+  onOpenTasks?: () => void;
 }
 
-type TabId = 'overview' | 'skills' | 'channels' | 'tasks';
+type TabId = 'overview' | 'skills' | 'channels';
 
 interface NavItem {
   id: TabId;
@@ -25,11 +26,10 @@ const navItems: NavItem[] = [
   { id: 'overview', label: '系统概览', icon: Activity },
   { id: 'skills', label: '技能中心', icon: Brain },
   { id: 'channels', label: '渠道状态', icon: Radio },
-  { id: 'tasks', label: '目标/任务', icon: Target },
 ];
 
-export function DashboardPage({ apiClient, onClose }: Props) {
-  const { data, fetchAll, fetchCronLogs, toggleSkill, toggleCronJob, reloadConfig, addCronJob, deleteCronJob } = useDashboardPage(apiClient);
+export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTasks }: Props) {
+  const { data, fetchAll, toggleSkill, reloadConfig } = useDashboardPage(apiClient);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [reloading, setReloading] = useState(false);
 
@@ -162,18 +162,9 @@ export function DashboardPage({ apiClient, onClose }: Props) {
             </div>
           ) : (
             <>
-              {activeTab === 'overview' && <DashboardOverview data={data} onTabChange={setActiveTab} />}
-              {activeTab === 'skills' && <DashboardSkills skills={data.skills} onToggle={toggleSkill} />}
+              {activeTab === 'overview' && <DashboardOverview data={data} onTabChange={setActiveTab} onOpenTasks={onOpenTasks} />}
+              {activeTab === 'skills' && <DashboardSkills skills={data.skills} onToggle={toggleSkill} onOpenMarket={onOpenSkillMarket} />}
               {activeTab === 'channels' && <DashboardChannels channels={data.channels} />}
-              {activeTab === 'tasks' && (
-                <DashboardTasks
-                  jobs={data.cronJobs}
-                  logs={data.cronLogs}
-                  onDelete={deleteCronJob}
-                  onFetchLogs={fetchCronLogs}
-                  onToggle={toggleCronJob}
-                />
-              )}
             </>
           )}
         </div>

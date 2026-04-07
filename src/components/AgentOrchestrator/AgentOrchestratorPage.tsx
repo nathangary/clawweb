@@ -39,6 +39,10 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [activatingRule, setActivatingRule] = useState<Rule | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const [activateMessages, setActivateMessages] = useState<GenerationMessage[]>([]);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editDescription, setEditDescription] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editMessages, setEditMessages] = useState<GenerationMessage[]>([]);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
@@ -435,6 +439,192 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     }
   };
 
+  const handleEditRule = async () => {
+    if (!editDescription.trim() || !selectedRule) return;
+    const client = getClient();
+    if (!client) {
+      showToast('error', '请先连接 Gateway');
+      return;
+    }
+
+    client.setChatId(`agentloop-${Date.now()}`);
+    setIsEditing(true);
+    setEditMessages([]);
+
+    const ruleContext = JSON.stringify({
+      name: selectedRule.name,
+      description: selectedRule.description,
+      triggerType: selectedRule.triggerType,
+      triggerConfig: selectedRule.triggerConfig,
+      skills: selectedRule.skills,
+      flow: selectedRule.flow,
+      systemPrompt: selectedRule.systemPrompt,
+    }, null, 2);
+
+    const fullMessage = `请帮我修改以下智能体规则。当前规则如下：\n\n\`\`\`json\n${ruleContext}\n\`\`\`\n\n我的修改需求如下：${editDescription}\n\n请返回修改后的完整规则 JSON，格式与上面相同。`;
+    client.send(fullMessage);
+
+    let handled = false;
+
+    const handleEditEvent = (event: NanobotOutboundEvent) => {
+      if (handled) return;
+      
+      if (event.eventType === 'progress') {
+        const text = event.content;
+        const toolHint = event.metadata?._tool_hint;
+        const thinking = event.metadata?._thinking as string | undefined;
+        
+        setEditMessages(prev => {
+          const msgs = [...prev];
+          if (thinking) {
+            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
+            if (thinkIdx >= 0) {
+              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
+            } else {
+              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
+            }
+          }
+          if (toolHint && typeof toolHint === 'string') {
+            const toolInfo = extractToolInfo(toolHint);
+            if (toolInfo) {
+              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+            }
+          }
+          if (text) {
+            const lastMsg = msgs[msgs.length - 1];
+            if (lastMsg && lastMsg.type === 'text') {
+              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
+            } else {
+              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
+            }
+          }
+          return msgs;
+        });
+        client.ack(event.eventId);
+      } else if (event.eventType === 'tool_hint') {
+        const toolContent = event.content;
+        if (toolContent) {
+          const toolInfo = extractToolInfo(toolContent);
+          if (toolInfo) {
+            setEditMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
+          }
+        }
+        client.ack(event.eventId);
+      } else if (event.eventType === 'final' && event.content) {
+        handled = true;
+        client.ack(event.eventId);
+        (async () => {
+          try {
+            let jsonStr = event.content.trim();
+            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+            if (codeBlockMatch) {
+              jsonStr = codeBlockMatch[1].trim();
+            } else {
+              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
+              if (braceMatch) {
+                jsonStr = braceMatch[0];
+              }
+            }
+            const parsed = JSON.parse(jsonStr);
+            const ruleData = parsed.rule || parsed;
+            
+            const rawNodes = ruleData.flow?.nodes || [];
+            const rawEdges = ruleData.flow?.edges || [];
+
+            const normalizeNodes = (nodes: any[]): any[] => {
+              return nodes.map(node => {
+                const skillRef = ruleData.skills?.find((s: any) => s.skillId === node.skillId);
+                return {
+                  id: node.id || `node-${Math.random().toString(36).slice(2, 8)}`,
+                  type: node.type === 'trigger' ? 'start' :
+                        node.type === 'end' ? 'end' :
+                        node.type === 'condition' ? 'condition' :
+                        node.type === 'action' ? 'skill' : node.type,
+                  label: node.label || node.name || skillRef?.name || '未命名',
+                  skillId: node.skillId,
+                  skillName: skillRef?.name || node.skillName || '',
+                };
+              });
+            };
+
+            const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
+              const validEdges = edges.filter(e => e.from && e.to);
+              if (validEdges.length === 0 && normalizedNodes.length > 1) {
+                const result: any[] = [];
+                for (let i = 0; i < normalizedNodes.length - 1; i++) {
+                  result.push({
+                    id: `e-${normalizedNodes[i].id}-${normalizedNodes[i + 1].id}`,
+                    source: normalizedNodes[i].id,
+                    target: normalizedNodes[i + 1].id,
+                    label: '',
+                  });
+                }
+                return result;
+              }
+              return validEdges.map(edge => ({
+                id: `e-${edge.from}-${edge.to}`,
+                source: edge.from,
+                target: edge.to,
+                label: edge.label || (edge.condition ? (edge.condition === 'sufficient' ? '是' : '否') : ''),
+              }));
+            };
+
+            const normalizedNodes = normalizeNodes(rawNodes);
+            const normalizedEdges = normalizeEdges(rawEdges, normalizedNodes);
+            
+            const normalizeTriggerType = (t: string): 'manual' | 'cron' | 'webhook' => {
+              if (t === 'cron' || t === 'schedule' || t === 'timed') return 'cron';
+              if (t === 'webhook' || t === 'event') return 'webhook';
+              return 'manual';
+            };
+
+            const updatedRule: Rule = {
+              ...selectedRule,
+              name: ruleData.name || selectedRule.name,
+              description: ruleData.description || selectedRule.description,
+              triggerType: normalizeTriggerType(ruleData.triggerType || selectedRule.triggerType),
+              triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig || selectedRule.triggerConfig),
+              skills: ruleData.skills || selectedRule.skills,
+              flow: {
+                nodes: normalizedNodes,
+                edges: normalizedEdges,
+              },
+              flowType: ruleData.flowType || selectedRule.flowType,
+              systemPrompt: parsed.systemPrompt || selectedRule.systemPrompt,
+            };
+
+            const saved = await saveRule(updatedRule);
+            if (saved) {
+              invalidateRulesCache();
+              await fetchRules();
+              await fetchMonitorStats();
+              setSelectedRule(saved);
+              setShowEdit(false);
+              showToast('success', `智能体「${saved.name}」已更新`, 4000);
+            } else {
+              showToast('error', '智能体保存失败，请重试');
+            }
+          } catch (e) {
+            console.error('解析修改后的规则失败:', e);
+            showToast('error', '规则修改失败，请重试');
+          } finally {
+            setIsEditing(false);
+            setEditMessages([]);
+            setEditDescription('');
+          }
+        })();
+      } else if (event.eventType === 'error') {
+        handled = true;
+        setIsEditing(false);
+        setEditMessages([]);
+        showToast('error', '修改规则时出错');
+      }
+    };
+
+    const unsubscribe = client.onEvent(handleEditEvent);
+    eventHandlerRef.current = unsubscribe;
+  };
+
   const filteredRules = rules.filter(r => {
     if (filterStatus !== 'all' && r.status !== filterStatus) return false;
     if (searchQuery) {
@@ -445,7 +635,22 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   });
 
   if (selectedRule) {
-    return <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} />;
+    return (
+      <>
+        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={() => { setShowEdit(true); setEditDescription(''); }} />
+        {showEdit && (
+          <EditRuleModal
+            rule={selectedRule}
+            onClose={() => { setShowEdit(false); setEditDescription(''); setIsEditing(false); setEditMessages([]); }}
+            description={editDescription}
+            setDescription={setEditDescription}
+            isEditing={isEditing}
+            editMessages={editMessages}
+            onEdit={handleEditRule}
+          />
+        )}
+      </>
+    );
   }
 
   return (
@@ -861,9 +1066,111 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
   );
 }
 
-function RuleDetail({ rule, onBack }: { rule: Rule; onBack: () => void }) {
+function EditRuleModal({ rule, onClose, description, setDescription, isEditing, editMessages, onEdit }: {
+  rule: Rule;
+  onClose: () => void;
+  description: string;
+  setDescription: (v: string) => void;
+  isEditing: boolean;
+  editMessages: GenerationMessage[];
+  onEdit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+      <div className="w-full max-w-2xl max-h-[80vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 px-6 py-4 border-b border-pc-border">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-pc-text">编辑智能体</h2>
+              <p className="text-xs text-pc-text-muted mt-0.5">{rule.name} — 用自然语言描述修改需求</p>
+            </div>
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="mb-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${
+                rule.status === 'active' ? 'bg-emerald-400' :
+                rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
+              }`} />
+              <span className="text-sm text-pc-text font-medium">{rule.name}</span>
+            </div>
+            <p className="text-xs text-pc-text-muted">{rule.description}</p>
+            <div className="mt-3 flex items-center gap-3 text-[10px] text-pc-text-muted">
+              <span>{rule.skills?.length || 0} 个技能</span>
+              <span>·</span>
+              <span>{rule.flow?.nodes?.length || 0} 个节点</span>
+            </div>
+          </div>
+
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="例如：在库存检查后增加一个发送邮件通知的步骤..."
+            className="w-full h-32 p-4 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-sm"
+          />
+          {isEditing && editMessages.length > 0 && (
+            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-48 overflow-y-auto">
+              <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
+                <Loader2 size={14} className="animate-spin text-pc-accent" />
+                <span>修改中...</span>
+              </div>
+              <div className="space-y-1.5">
+                {editMessages.map((msg) => (
+                  <div key={msg.id} className="text-xs">
+                    {msg.type === 'thinking' && (
+                      <div className="flex items-start gap-2 text-pc-text-muted">
+                        <span>💭</span><span>{msg.content.slice(0, 150)}...</span>
+                      </div>
+                    )}
+                    {msg.type === 'tool_use' && (
+                      <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
+                        <Zap size={11} className="text-pc-accent" />
+                        <span className="text-pc-text">调用: {msg.name}</span>
+                      </div>
+                    )}
+                    {msg.type === 'text' && (
+                      <div className="text-pc-text-muted">{msg.content.slice(0, 80)}...</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="mt-4 p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+            <h3 className="text-xs font-medium text-pc-text mb-2">示例</h3>
+            <div className="flex flex-wrap gap-2">
+              {['在流程末尾增加一个发送邮件通知的步骤', '将触发方式改为每天早上9点定时执行', '在库存检查后增加一个条件判断，如果库存充足则跳过通知'].map((example, idx) => (
+                <button key={idx} onClick={() => setDescription(example)} className="text-left px-3 py-1.5 rounded-lg text-xs text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
+                  {example}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end">
+          <button
+            onClick={onEdit}
+            disabled={!description.trim() || isEditing}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
+          >
+            {isEditing ? (
+              <><div className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin" /><span>修改中...</span></>
+            ) : (
+              <><span>✨</span><span>确认修改</span></>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RuleDetail({ rule, onBack, onEdit }: { rule: Rule; onBack: () => void; onEdit: () => void }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
-  const [isEditing, setIsEditing] = useState(false);
 
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--pc-bg-base)] flex flex-col overflow-hidden">
@@ -879,16 +1186,9 @@ function RuleDetail({ rule, onBack }: { rule: Rule; onBack: () => void }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isEditing ? (
-              <>
-                <button onClick={() => setIsEditing(false)} className="px-4 py-2 rounded-xl text-sm text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">取消</button>
-                <button onClick={() => setIsEditing(false)} className="px-4 py-2 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 transition-all">保存</button>
-              </>
-            ) : (
-              <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
-                <Edit3 size={14} />编辑规则
-              </button>
-            )}
+            <button onClick={onEdit} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
+              <Edit3 size={14} />编辑规则
+            </button>
           </div>
         </div>
         <div className="px-6 pb-4">
@@ -911,16 +1211,16 @@ function RuleDetail({ rule, onBack }: { rule: Rule; onBack: () => void }) {
       </header>
       <main className="flex-1 overflow-y-auto p-6">
         {viewMode === 'graph' ? (
-          <FlowGraphView flow={rule.flow} isEditing={isEditing} />
+          <FlowGraphView flow={rule.flow} />
         ) : (
-          <FlowListView flow={rule.flow} isEditing={isEditing} />
+          <FlowListView flow={rule.flow} />
         )}
       </main>
     </div>
   );
 }
 
-function FlowGraphView({ flow, isEditing }: { flow: FlowGraph; isEditing: boolean }) {
+function FlowGraphView({ flow }: { flow: FlowGraph }) {
   const validEdges = flow.edges.filter(e => e.source && e.target);
   const conditionEdges = validEdges.filter(e => e.label);
 
@@ -942,7 +1242,7 @@ function FlowGraphView({ flow, isEditing }: { flow: FlowGraph; isEditing: boolea
 
           return (
             <div key={node.id} className="relative">
-              <div className={`relative group rounded-2xl border bg-gradient-to-br ${cfg.gradient} ${cfg.border} shadow-lg ${cfg.glow} backdrop-blur-sm transition-all duration-300 ${isEditing ? 'cursor-pointer hover:scale-[1.02] hover:shadow-xl' : ''}`}>
+              <div className={`relative group rounded-2xl border bg-gradient-to-br ${cfg.gradient} ${cfg.border} shadow-lg ${cfg.glow} backdrop-blur-sm transition-all duration-300`}>
                 <div className="flex items-center gap-4 p-4">
                   <div className={`relative w-12 h-12 rounded-xl bg-gradient-to-br ${cfg.gradient} ${cfg.border} border flex items-center justify-center shrink-0`}>
                     <Icon size={20} className={cfg.accent} />
@@ -1029,7 +1329,7 @@ function FlowGraphView({ flow, isEditing }: { flow: FlowGraph; isEditing: boolea
   );
 }
 
-function FlowListView({ flow, isEditing }: { flow: FlowGraph; isEditing: boolean }) {
+function FlowListView({ flow }: { flow: FlowGraph }) {
   const allNodes = flow.nodes.filter(n => n.type !== 'start' && n.type !== 'end');
 
   if (allNodes.length === 0) {
@@ -1076,13 +1376,6 @@ function FlowListView({ flow, isEditing }: { flow: FlowGraph; isEditing: boolean
                 </div>
                 <div className="text-sm text-white/70">{node.label}</div>
               </div>
-
-              {isEditing && (
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white/60"><Edit3 size={14} /></button>
-                  <button className="p-2 rounded-lg hover:bg-red-500/10 text-white/30 hover:text-red-400"><Trash2 size={14} /></button>
-                </div>
-              )}
             </div>
           </div>
         ))}

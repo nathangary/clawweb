@@ -4,7 +4,8 @@ import type { DashboardData } from '../../hooks/useDashboardPage';
 
 interface Props {
   data: DashboardData;
-  onTabChange: (tab: 'overview' | 'skills' | 'channels' | 'tasks') => void;
+  onTabChange: (tab: 'overview' | 'skills' | 'channels') => void;
+  onOpenTasks?: () => void;
 }
 
 interface StatCard {
@@ -22,7 +23,7 @@ const statCards: StatCard[] = [
   { title: '任务', value: 0, label: '执行中', icon: Target, color: 'from-amber-500 to-orange-500', tab: 'tasks' },
 ];
 
-export function DashboardOverview({ data, onTabChange }: Props) {
+export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
   const enabledSkills = data.skills.filter(s => s.enabled).length;
   const onlineChannels = Object.values(data.channels).filter(c => c.status === 'connected').length;
   const runningCrons = data.cronJobs.filter(c => c.enabled && c.state.next_run_at).length;
@@ -35,7 +36,7 @@ export function DashboardOverview({ data, onTabChange }: Props) {
     { ...statCards[0], value: data.skills.length, label: `${enabledSkills} 已启用` },
     { ...statCards[1], value: Object.keys(data.channels).length, label: `${onlineChannels} 在线` },
     { ...statCards[2], value: data.cronJobs.length, label: `${runningCrons} 执行中` },
-    { title: '执行', value: totalExecutions, label: `${successRate}% 成功率`, icon: Activity, color: 'from-cyan-500 to-blue-500', tab: 'tasks' as const },
+    { title: '执行', value: totalExecutions, label: `${successRate}% 成功率`, icon: Activity, color: 'from-cyan-500 to-blue-500', tab: 'skills' as const },
   ];
 
   const systemHealth = data.health?.services ?? [
@@ -51,7 +52,6 @@ export function DashboardOverview({ data, onTabChange }: Props) {
   }));
 
   const quickActions = [
-    { label: '新建任务', icon: Target, action: () => onTabChange('tasks') },
     { label: '管理技能', icon: Brain, action: () => onTabChange('skills') },
     { label: '查看渠道', icon: Radio, action: () => onTabChange('channels') },
   ];
@@ -64,7 +64,13 @@ export function DashboardOverview({ data, onTabChange }: Props) {
           return (
             <button
               key={idx}
-              onClick={() => onTabChange(stat.tab)}
+              onClick={() => {
+                if (stat.tab === 'tasks') {
+                  onOpenTasks?.();
+                } else {
+                  onTabChange(stat.tab);
+                }
+              }}
               className="relative group p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-white/20 transition-all text-left overflow-hidden"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-10 transition-opacity`} />

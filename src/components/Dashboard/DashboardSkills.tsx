@@ -1,9 +1,10 @@
-import { Sparkles, Code, Search, MessageCircle, Image, FileText, Database, Webhook } from 'lucide-react';
+import { Sparkles, Code, Search, MessageCircle, Image, FileText, Database, Webhook, ExternalLink } from 'lucide-react';
 import type { NanobotSkill } from '../../lib/nanobotApi';
 
 interface Props {
   skills: NanobotSkill[];
   onToggle: (skillName: string, enabled: boolean) => Promise<boolean>;
+  onOpenMarket?: () => void;
 }
 
 const skillIcons: Record<string, typeof Sparkles> = {
@@ -21,7 +22,7 @@ function getSkillIcon(name: string) {
   return skillIcons[key] || Sparkles;
 }
 
-export function DashboardSkills({ skills, onToggle }: Props) {
+export function DashboardSkills({ skills, onToggle, onOpenMarket }: Props) {
   const handleToggle = async (skillName: string, currentEnabled: boolean) => {
     await onToggle(skillName, !currentEnabled);
   };
@@ -30,9 +31,21 @@ export function DashboardSkills({ skills, onToggle }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium text-white">技能中心</h3>
-        <span className="text-sm text-white/40">
-          {skills.filter(s => s.enabled).length} / {skills.length} 已启用
-        </span>
+        <div className="flex items-center gap-3">
+          {onOpenMarket && (
+            <button
+              onClick={onOpenMarket}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-colors"
+              title="前往技能市场"
+            >
+              <ExternalLink size={12} />
+              <span>技能市场</span>
+            </button>
+          )}
+          <span className="text-sm text-white/40">
+            {skills.filter(s => s.enabled).length} / {skills.length} 已启用
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

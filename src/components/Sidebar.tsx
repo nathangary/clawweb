@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil, FileText } from 'lucide-react';
+import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil, FileText, Target } from 'lucide-react';
 import type { Session } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SessionIcon } from './SessionIcon';
@@ -250,9 +250,10 @@ interface Props {
   onOpenSkillHub?: () => void;
   onOpenAgentOrchestrator?: () => void;
   onOpenHistoryFiles?: () => void;
+  onOpenTasks?: () => void;
 }
 
-export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub, onOpenAgentOrchestrator, onOpenHistoryFiles }: Props) {
+export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub, onOpenAgentOrchestrator, onOpenHistoryFiles, onOpenTasks }: Props) {
   const t = useT();
   const [filter, setFilter] = useState('');
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -621,7 +622,16 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
                 className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
               >
                 <FileText size={16} />
-                <span className="font-medium">历史文件</span>
+                <span className="font-medium">我的文件</span>
+              </button>
+            )}
+            {onOpenTasks && (
+              <button
+                onClick={onOpenTasks}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <Target size={16} />
+                <span className="font-medium">目标/任务</span>
               </button>
             )}
           </div>
