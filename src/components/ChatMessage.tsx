@@ -2,7 +2,8 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { LazyMarkdown } from './LazyMarkdown';
-import { HtmlPreview, extractHtmlPath, extractHtmlDocuments } from './HtmlPreview';
+import { HtmlPreview, extractHtmlPath } from './HtmlPreview';
+import { DocumentPreview, extractDocuments } from './DocumentPreview';
 import type { ChatMessage as ChatMessageType, MessageBlock } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -544,8 +545,8 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
             <HtmlPreview filePath={extractHtmlPath(message.content || '') as string} />
           )}
 
-          {message.multimodalResponse && extractHtmlDocuments(message.multimodalResponse).map((doc, i) => (
-            <HtmlPreview key={`html-${i}`} assetId={doc.assetId} />
+          {message.multimodalResponse && extractDocuments(message.multimodalResponse).map((doc, i) => (
+            <DocumentPreview key={`doc-${i}`} assetId={doc.assetId} fileName={doc.fileName} mimeType={doc.mimeType} />
           ))}
 
           {message.isStreaming && (() => {
