@@ -1,10 +1,5 @@
 import { genId } from './utils';
 
-const isDebug = () => {
-  try { return localStorage.getItem('pinchchat:debug') === '1'; } catch { return false; }
-};
-const log = (...args: unknown[]) => { if (isDebug()) console.log('[NanoBot]', ...args); };
-
 export interface NanobotInboundMessage {
   messageId: string;
   channel: string;
@@ -65,6 +60,8 @@ export class NanobotGatewayClient {
   private authToken: string;
   private clientId: string;
   private chatId: string;
+  private processedEventIds = new Set<string>();
+  private cleanupProcessedIdsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(wsUrl?: string, authToken?: string, clientId?: string, chatId?: string) {
     this.wsUrl = wsUrl || `ws://${window.location.hostname}:8787/ws`;
@@ -87,6 +84,9 @@ export class NanobotGatewayClient {
   }
 
   onEvent(fn: NanobotEventHandler) {
+    if (this.eventHandlers.includes(fn)) {
+      return () => { this.eventHandlers = this.eventHandlers.filter(h => h !== fn); };
+    }
     this.eventHandlers.push(fn);
     return () => { this.eventHandlers = this.eventHandlers.filter(h => h !== fn); };
   }
@@ -95,11 +95,9 @@ export class NanobotGatewayClient {
     if (this.ws) return;
     this.autoReconnect = true;
     this._onStatus('connecting');
-    log('Connecting to', this.wsUrl);
     this.ws = new WebSocket(this.wsUrl);
 
     this.ws.onopen = () => {
-      log('WebSocket open');
       this.connected = true;
       this.reconnectAttempts = 0;
       this._onStatus('connected');
@@ -109,23 +107,20 @@ export class NanobotGatewayClient {
     this.ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data as string);
-        log('Received:', data);
         this.handleMessage(data);
-      } catch (err) {
-        log('Parse error:', err);
+      } catch {
+        // ignore parse errors
       }
     };
 
-    this.ws.onclose = (ev) => {
-      log('WebSocket close:', ev.code, ev.reason);
+    this.ws.onclose = () => {
       this.ws = null;
       this.connected = false;
       this._onStatus('disconnected');
       if (this.autoReconnect) this.scheduleReconnect();
     };
 
-    this.ws.onerror = (err) => { 
-      log('WebSocket error', err);
+    this.ws.onerror = () => { 
       this._onStatus('disconnected');
     };
   }
@@ -134,12 +129,18 @@ export class NanobotGatewayClient {
     this.autoReconnect = false;
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.cleanupProcessedIdsTimer) { clearInterval(this.cleanupProcessedIdsTimer); this.cleanupProcessedIdsTimer = null; }
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.connected = false;
+    this.processedEventIds.clear();
     this._onStatus('disconnected');
   }
 
   private handleMessage(data: NanobotOutboundEvent) {
+    if (this.processedEventIds.has(data.eventId)) {
+      return;
+    }
+    this.processedEventIds.add(data.eventId);
     for (const h of this.eventHandlers) {
       h(data);
     }
@@ -152,7 +153,6 @@ export class NanobotGatewayClient {
       session_key: sessionKey,
       chat_id: this.chatId,
     });
-    log('Bound to session:', sessionKey);
   }
 
   send(message: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) {
@@ -174,7 +174,6 @@ export class NanobotGatewayClient {
     }
 
     this.sendRaw(msg);
-    log('Sent message:', msg);
   }
 
   sendToSession(sessionKey: string, message: string) {
@@ -193,7 +192,6 @@ export class NanobotGatewayClient {
     }
 
     this.sendRaw(msg);
-    log('Sent to session:', sessionKey, msg);
   }
 
   bindToSession(sessionKey: string, chatId?: string) {
@@ -203,12 +201,10 @@ export class NanobotGatewayClient {
       session_key: sessionKey,
       chat_id: targetChatId,
     });
-    log('Bound to session:', sessionKey);
   }
 
   private sendRaw(data: Record<string, unknown>) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      log('Not connected, cannot send');
       return;
     }
     this.ws.send(JSON.stringify(data));
@@ -227,7 +223,6 @@ export class NanobotGatewayClient {
     const jitter = Math.random() * base * 0.3;
     const delay = base + jitter;
     this.reconnectAttempts++;
-    log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();

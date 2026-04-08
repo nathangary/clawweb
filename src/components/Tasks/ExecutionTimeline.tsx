@@ -1,5 +1,5 @@
 import { Clock, MessageSquare, Sparkles, AlertTriangle } from 'lucide-react';
-import type { CronLogEntry } from '../../../lib/nanobotApi';
+import type { CronLogEntry } from '../../lib/nanobotApi';
 
 interface Props {
   logs: CronLogEntry[];

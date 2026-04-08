@@ -1,5 +1,5 @@
 import { Target } from 'lucide-react';
-import type { CronJob } from '../../../lib/nanobotApi';
+import type { CronJob } from '../../lib/nanobotApi';
 import { TaskRow } from './TaskRow';
 
 interface Props {

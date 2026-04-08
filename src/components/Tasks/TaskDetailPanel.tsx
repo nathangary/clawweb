@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Calendar, Clock, CheckCircle, XCircle, Activity, Trash2, FileText, GitBranch, Loader2 } from 'lucide-react';
-import type { CronJob, CronLogEntry } from '../../../lib/nanobotApi';
+import type { CronJob, CronLogEntry } from '../../lib/nanobotApi';
 import { getTaskHealth, getStatusColor, getStatusLabel, cronToHuman } from './utils';
 import { ExecutionTimeline } from './ExecutionTimeline';
 

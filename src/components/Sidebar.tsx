@@ -1,65 +1,13 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, ArrowUpCircle, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil, FileText, Target } from 'lucide-react';
+import { X, Search, Pin, Trash2, Columns2, Clock, Bot, MessageSquare, Globe, Zap, Plus, ChevronDown, LayoutDashboard, Wand2, Pencil, FileText, Target } from 'lucide-react';
 import type { Session } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SessionIcon } from './SessionIcon';
 import { sessionDisplayName, extractAgentIdFromKey } from '../lib/sessionName';
 import { relativeTime } from '../lib/relativeTime';
-import { useUpdateCheck } from '../hooks/useUpdateCheck';
-import { usePwaInstall } from '../hooks/usePwaInstall';
-
-function VersionBadge() {
-  const update = useUpdateCheck(__APP_VERSION__);
-  if (update.available) {
-    return (
-      <span className="ml-1 inline-flex items-center gap-1.5 text-[9px]">
-        <span className="text-pc-text-faint select-all">v{__APP_VERSION__}</span>
-        <a
-          href={update.releaseUrl || '#'}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/25 transition-colors"
-          title={`Update available: v${update.latestVersion}`}
-        >
-          <ArrowUpCircle size={10} />
-          <span>{update.latestVersion} available</span>
-        </a>
-      </span>
-    );
-  }
-  return (
-    <span className="ml-1 text-[9px] text-pc-text-faint select-all" title={`伯俊智能舱 v${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
-  );
-}
 
 function SidebarFooter() {
-  // const pwa = usePwaInstall();
-  // return (
-  //   <div className="px-4 py-3 border-t border-pc-border flex items-center justify-center gap-3">
-  //     {pwa.canInstall && (
-  //       <button
-  //         onClick={pwa.install}
-  //         className="inline-flex items-center gap-1 text-[10px] text-pc-accent-light hover:text-[var(--pc-accent)] transition-colors"
-  //         title="Install app"
-  //         aria-label="Install app"
-  //       >
-  //         <Download size={11} />
-  //         <span>Install</span>
-  //       </button>
-  //     )}
-  //     <a
-  //       href="https://github.com/MarlBurroW/pinchchat"
-  //       target="_blank"
-  //       rel="noopener noreferrer"
-  //       className="text-pc-text-faint hover:text-pc-text-secondary transition-colors"
-  //       title="GitHub"
-  //       aria-label="GitHub repository"
-  //     >
-  //       <Globe size={11} />
-  //     </a>
-  //     <VersionBadge />
-  //   </div>
-  // );
+  return null;
 }
 
 const PINNED_KEY = 'pinchchat-pinned-sessions';

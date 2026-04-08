@@ -1,4 +1,4 @@
-import type { CronJob } from '../../../lib/nanobotApi';
+import type { CronJob } from '../../lib/nanobotApi';
 
 export type TaskStatus = 'active' | 'paused' | 'failing' | 'upcoming' | 'running';
 

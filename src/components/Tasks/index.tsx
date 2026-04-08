@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import type { CronJob, CronLogEntry } from '../../../lib/nanobotApi';
+import type { CronJob, CronLogEntry } from '../../lib/nanobotApi';
 import { TaskFilters } from './TaskFilters';
 import { TaskList } from './TaskList';
 import { TaskDetailPanel } from './TaskDetailPanel';

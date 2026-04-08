@@ -1,11 +1,10 @@
 import { useCallback, useState, useRef, useEffect, forwardRef } from 'react';
-import { Menu, Sparkles, LogOut, Cpu, Bot, Download, Minimize2, Info, Copy, Check, Settings, LayoutDashboard, Wand2 } from 'lucide-react';
+import { Menu, Sparkles, LogOut, Cpu, Bot, Minimize2, Info, Copy, Check, Settings, LayoutDashboard, Wand2 } from 'lucide-react';
 import type { ConnectionStatus, Session, ChatMessage } from '../types';
 import { useT } from '../hooks/useLocale';
 import { SettingsModal } from './SettingsModal';
 import { copyToClipboard } from '../lib/clipboard';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from '../lib/sessionName';
-import { messagesToMarkdown, downloadFile } from '../lib/exportChat';
 
 interface Props {
   status: ConnectionStatus;
@@ -49,14 +48,6 @@ export function Header({ status, sessionKey, onToggleSidebar, activeSessionData,
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showSessionInfo]);
-
-  const handleExport = useCallback(() => {
-    if (!messages || messages.length === 0) return;
-    const md = messagesToMarkdown(messages, sessionLabel);
-    const safeLabel = sessionLabel.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
-    const date = new Date().toISOString().slice(0, 10);
-    downloadFile(md, `${safeLabel}_${date}.md`);
-  }, [messages, sessionLabel]);
 
   return (
     <>

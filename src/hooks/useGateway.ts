@@ -23,6 +23,7 @@ export function useGateway() {
   const messagesRef = useRef(messages);
   const activeSessionRef = useRef(activeSession);
   const currentEventIdRef = useRef<string | null>(null);
+  const currentStreamingIdRef = useRef<string | null>(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
@@ -65,47 +66,55 @@ export function useGateway() {
       const text = event.content;
       const toolHint = event.metadata?._tool_hint;
 
-      setMessages(prev => {
-        for (let i = prev.length - 1; i >= 0; i--) {
-          const m = prev[i];
-          if (m.role === 'assistant' && m.isStreaming) {
-            const updated = { ...m };
-            if (text) updated.content = text;
-            const blocks: MessageBlock[] = [];
-            if (toolHint) {
-              const toolInfo = extractToolInfo(toolHint);
-              if (toolInfo) {
-                blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
-              }
+      const existingStreamingId = currentStreamingIdRef.current;
+      const existingStreaming = messagesRef.current.find(m => m.role === 'assistant' && m.isStreaming && m.id === existingStreamingId);
+      
+      if (existingStreaming && existingStreaming.runId === event.eventId) {
+        setMessages(prev => {
+          const idx = prev.findIndex(m => m.id === existingStreaming.id);
+          if (idx === -1) return prev;
+          const updated = { ...existingStreaming };
+          if (text) updated.content = text;
+          const blocks: MessageBlock[] = [];
+          if (toolHint) {
+            const toolInfo = extractToolInfo(toolHint);
+            if (toolInfo) {
+              blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
             }
-            if (text) blocks.push({ type: 'text', text });
-            updated.blocks = blocks;
-            const updatedMsgs: ChatMessage[] = [...prev];
-            updatedMsgs[i] = updated;
-            return updatedMsgs;
           }
+          if (text) blocks.push({ type: 'text', text });
+          updated.blocks = blocks;
+          const newMsgs = [...prev];
+          newMsgs[idx] = updated;
+          return newMsgs;
+        });
+        return;
+      }
+
+      if (currentEventIdRef.current === null) {
+        return;
+      }
+      
+      const blocks: MessageBlock[] = [];
+      if (toolHint) {
+        const toolInfo = extractToolInfo(toolHint);
+        if (toolInfo) {
+          blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
         }
-        if (currentEventIdRef.current === null) return prev;
-        const blocks: MessageBlock[] = [];
-        if (toolHint) {
-          const toolInfo = extractToolInfo(toolHint);
-          if (toolInfo) {
-            blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
-          }
-        }
-        if (text) blocks.push({ type: 'text', text });
-        const msg: ChatMessage = {
-          id: event.eventId,
-          role: 'assistant',
-          content: text || '',
-          timestamp: Date.now(),
-          blocks,
-          isStreaming: true,
-          runId: event.eventId,
-          streamStartedAt: Date.now(),
-        };
-        return [...prev, msg];
-      });
+      }
+      if (text) blocks.push({ type: 'text', text });
+      const msg: ChatMessage = {
+        id: event.eventId,
+        role: 'assistant',
+        content: text || '',
+        timestamp: Date.now(),
+        blocks,
+        isStreaming: true,
+        runId: event.eventId,
+        streamStartedAt: Date.now(),
+      };
+      currentStreamingIdRef.current = event.eventId;
+      setMessages(prev => [...prev, msg]);
     } else if (event.eventType === 'tool_hint') {
       const toolContent = event.content;
       if (toolContent) {
@@ -147,6 +156,7 @@ export function useGateway() {
         }
       }
       currentEventIdRef.current = null;
+      currentStreamingIdRef.current = null;
       setIsGenerating(false);
 
       const processMedia = (media?: string[] | NanobotMediaItem[]): MessageBlock[] => {
@@ -179,13 +189,14 @@ export function useGateway() {
           for (let i = prev.length - 1; i >= 0; i--) {
             const m = prev[i];
             if (m.role === 'assistant' && m.isStreaming) {
-              const mergedBlocks = [...m.blocks, ...newImageBlocks];
+              const finalBlocks: MessageBlock[] = event.content ? [{ type: 'text' as const, text: event.content }] : [];
+              const mergedBlocks = [...finalBlocks, ...newImageBlocks];
               const updated: ChatMessage[] = [...prev];
               updated[i] = {
                 ...m,
                 isStreaming: false,
                 content: event.content,
-                blocks: mergedBlocks.length > 0 ? mergedBlocks : m.blocks,
+                blocks: mergedBlocks,
                 multimodalResponse,
               };
               return updated;

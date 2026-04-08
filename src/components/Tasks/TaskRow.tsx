@@ -1,5 +1,5 @@
 import { ChevronRight, Trash2, Calendar, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
-import type { CronJob } from '../../../lib/nanobotApi';
+import type { CronJob } from '../../lib/nanobotApi';
 import { getTaskHealth, getStatusColor, getStatusLabel, cronToHuman } from './utils';
 
 interface Props {
