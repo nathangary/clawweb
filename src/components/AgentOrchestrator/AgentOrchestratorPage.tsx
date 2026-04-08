@@ -1233,11 +1233,11 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
   const validEdges = flow.edges.filter(e => e.source && e.target);
   const conditionEdges = validEdges.filter(e => e.label);
 
-  const nodeConfig: Record<string, { icon: typeof Bot; gradient: string; border: string; glow: string; accent: string }> = {
-    start: { icon: Circle, gradient: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', glow: 'shadow-emerald-500/10', accent: 'text-emerald-400' },
-    end: { icon: Square, gradient: 'from-zinc-500/20 to-zinc-500/5', border: 'border-zinc-500/40', glow: 'shadow-zinc-500/10', accent: 'text-zinc-400' },
-    condition: { icon: GitFork, gradient: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', glow: 'shadow-amber-500/10', accent: 'text-amber-400' },
-    skill: { icon: Bot, gradient: 'from-cyan-500/20 to-violet-500/10', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/10', accent: 'text-cyan-400' },
+  const nodeConfig: Record<string, { icon: typeof Bot; gradient: string; border: string; glow: string; accent: string; bgLight: string }> = {
+    start: { icon: Circle, gradient: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', glow: 'shadow-emerald-500/10', accent: 'text-emerald-400', bgLight: 'bg-emerald-500/10' },
+    end: { icon: Square, gradient: 'from-zinc-500/20 to-zinc-500/5', border: 'border-zinc-500/40', glow: 'shadow-zinc-500/10', accent: 'text-zinc-400', bgLight: 'bg-zinc-500/10' },
+    condition: { icon: GitFork, gradient: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', glow: 'shadow-amber-500/10', accent: 'text-amber-400', bgLight: 'bg-amber-500/10' },
+    skill: { icon: Bot, gradient: 'from-cyan-500/20 to-violet-500/10', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/10', accent: 'text-cyan-400', bgLight: 'bg-cyan-500/10' },
   };
 
   return (
@@ -1260,21 +1260,21 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${cfg.accent} bg-white/5`}>
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${cfg.accent} bg-[var(--pc-hover)]`}>
                         {node.type === 'start' ? '触发' : node.type === 'end' ? '结束' : node.type === 'condition' ? '条件' : '技能'}
                       </span>
                       {node.skillName && (
                         <>
-                          <span className="text-xs text-white/30">·</span>
-                          <span className="text-xs text-cyan-400/80 font-medium">{node.skillName}</span>
+                          <span className="text-xs text-pc-text-muted">·</span>
+                          <span className="text-xs text-[var(--pc-accent)] font-medium">{node.skillName}</span>
                         </>
                       )}
                     </div>
-                    <div className="text-sm text-white/80 font-medium">{node.label}</div>
+                    <div className="text-sm text-pc-text font-medium">{node.label}</div>
                   </div>
 
                   {node.type !== 'start' && node.type !== 'end' && (
-                    <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xs text-white/40 font-mono shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-[var(--pc-hover)] border border-pc-border flex items-center justify-center text-xs text-pc-text-muted font-mono shrink-0">
                       {idx}
                     </div>
                   )}
@@ -1283,7 +1283,7 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
                 {outgoingEdges.length > 0 && outgoingEdges.some(e => e.label) && (
                   <div className="px-4 pb-3 flex gap-2">
                     {outgoingEdges.filter(e => e.label).map((edge, i) => (
-                      <span key={i} className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-400/80 border border-amber-500/20">
+                      <span key={i} className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
                         {edge.label}
                       </span>
                     ))}
@@ -1294,9 +1294,9 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
               {!isLast && (
                 <div className="flex justify-center py-2">
                   <div className="relative flex flex-col items-center">
-                    <div className="w-px h-6 bg-gradient-to-b from-white/20 to-white/5" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-white/20 -mt-0.5" />
-                    <div className="w-px h-6 bg-gradient-to-b from-white/5 to-white/20" />
+                    <div className="w-px h-6 bg-gradient-to-b from-[var(--pc-border-strong)] to-transparent" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--pc-border-strong)] -mt-0.5" />
+                    <div className="w-px h-6 bg-gradient-to-b from-transparent to-[var(--pc-border-strong)]" />
                   </div>
                 </div>
               )}
@@ -1306,8 +1306,8 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
       </div>
 
       {conditionEdges.length > 0 && (
-        <div className="mt-8 p-5 rounded-2xl bg-white/[0.02] border border-white/10">
-          <h4 className="text-sm font-medium text-white/60 mb-4 flex items-center gap-2">
+        <div className="mt-8 p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+          <h4 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
             <GitFork size={14} className="text-amber-400" />
             条件分支
           </h4>
@@ -1318,9 +1318,9 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
               return (
                 <div key={edge.id || `edge-${idx}`} className="flex items-center gap-3 text-sm">
                   <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20">{edge.label}</span>
-                  <span className="text-white/30">{sourceNode?.label || '?'} </span>
-                  <ArrowRight size={12} className="text-white/20" />
-                  <span className="text-white/60">{targetNode?.label || '?'}</span>
+                  <span className="text-pc-text-muted">{sourceNode?.label || '?'} </span>
+                  <ArrowRight size={12} className="text-pc-text-faint" />
+                  <span className="text-pc-text-secondary">{targetNode?.label || '?'}</span>
                 </div>
               );
             })}
@@ -1328,7 +1328,7 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
         </div>
       )}
 
-      <div className="mt-6 flex items-center justify-center gap-6 text-xs text-white/30">
+      <div className="mt-6 flex items-center justify-center gap-6 text-xs text-pc-text-muted">
         <div className="flex items-center gap-2"><Circle size={8} className="text-emerald-400" />开始</div>
         <div className="flex items-center gap-2"><Bot size={10} className="text-cyan-400" />技能</div>
         <div className="flex items-center gap-2"><GitFork size={10} className="text-amber-400" />条件</div>
@@ -1342,7 +1342,7 @@ function FlowListView({ flow }: { flow: FlowGraph }) {
   const allNodes = flow.nodes.filter(n => n.type !== 'start' && n.type !== 'end');
 
   if (allNodes.length === 0) {
-    return <div className="text-center py-12 text-white/30">暂无流程步骤</div>;
+    return <div className="text-center py-12 text-pc-text-muted">暂无流程步骤</div>;
   }
 
   return (
@@ -1353,7 +1353,7 @@ function FlowListView({ flow }: { flow: FlowGraph }) {
             <div className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${
               node.type === 'condition'
                 ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/30'
-                : 'bg-white/[0.02] border-white/10 hover:border-white/15'
+                : 'bg-[var(--pc-bg-surface)] border-pc-border hover:border-[var(--pc-accent-dim)]'
             }`}>
               <div className="relative shrink-0">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
@@ -1368,7 +1368,7 @@ function FlowListView({ flow }: { flow: FlowGraph }) {
                   )}
                 </div>
                 {idx < allNodes.length - 1 && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-px h-1 bg-gradient-to-b from-white/20 to-transparent" />
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-px h-1 bg-gradient-to-b from-[var(--pc-border)] to-transparent" />
                 )}
               </div>
 
@@ -1380,10 +1380,10 @@ function FlowListView({ flow }: { flow: FlowGraph }) {
                     {node.type === 'condition' ? '条件' : '技能'}
                   </span>
                   {node.skillName && (
-                    <span className="text-xs text-white/40">{node.skillName}</span>
+                    <span className="text-xs text-pc-text-muted">{node.skillName}</span>
                   )}
                 </div>
-                <div className="text-sm text-white/70">{node.label}</div>
+                <div className="text-sm text-pc-text-secondary">{node.label}</div>
               </div>
             </div>
           </div>

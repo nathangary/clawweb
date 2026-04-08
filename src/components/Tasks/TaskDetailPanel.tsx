@@ -37,7 +37,7 @@ export function TaskDetailPanel({ job, logs, onFetchLogs, onClose, onDelete }: P
   };
 
   return (
-    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[95] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[85vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="shrink-0 px-6 py-4 border-b border-pc-border">
           <div className="flex items-center justify-between">
@@ -96,7 +96,7 @@ function OverviewTab({ job, health, scheduleLabel, onDelete }: {
   return (
     <div className="space-y-5">
       <div className="space-y-3">
-        <h4 className="text-xs font-medium text-white/60 uppercase tracking-wider">基本信息</h4>
+        <h4 className="text-xs font-medium text-pc-text-secondary uppercase tracking-wider">基本信息</h4>
         <div className="space-y-2">
           <InfoRow label="任务 ID" value={job.id} mono />
           <InfoRow label="状态" value={getStatusLabel(health.status)} />
@@ -108,13 +108,13 @@ function OverviewTab({ job, health, scheduleLabel, onDelete }: {
       </div>
 
       <div className="space-y-3">
-        <h4 className="text-xs font-medium text-white/60 uppercase tracking-wider">执行统计</h4>
+        <h4 className="text-xs font-medium text-pc-text-secondary uppercase tracking-wider">执行统计</h4>
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             icon={health.lastStatus === 'ok' ? CheckCircle : health.lastStatus === 'error' ? XCircle : Clock}
             label="上次状态"
             value={health.lastStatus === 'ok' ? '成功' : health.lastStatus === 'error' ? '失败' : '未执行'}
-            color={health.lastStatus === 'ok' ? 'text-emerald-400' : health.lastStatus === 'error' ? 'text-red-400' : 'text-white/40'}
+            color={health.lastStatus === 'ok' ? 'text-emerald-400' : health.lastStatus === 'error' ? 'text-red-400' : 'text-pc-text-muted'}
           />
           <StatCard
             icon={Calendar}
@@ -126,7 +126,7 @@ function OverviewTab({ job, health, scheduleLabel, onDelete }: {
       </div>
 
       <div className="space-y-3">
-        <h4 className="text-xs font-medium text-white/60 uppercase tracking-wider">操作</h4>
+        <h4 className="text-xs font-medium text-pc-text-secondary uppercase tracking-wider">操作</h4>
         <button
           onClick={() => { if (confirm(`确定删除任务 "${job.name}" 吗？`)) onDelete(job.id); }}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
@@ -143,8 +143,8 @@ function TimelineTab({ logs, loading }: { logs: CronLogEntry[] | undefined; load
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 size={20} className="text-white/30 animate-spin mb-2" />
-        <p className="text-white/40 text-xs">加载执行记录...</p>
+        <Loader2 size={20} className="text-pc-text-faint animate-spin mb-2" />
+        <p className="text-pc-text-muted text-xs">加载执行记录...</p>
       </div>
     );
   }
@@ -155,8 +155,8 @@ function LogsTab({ logs, loading }: { logs: CronLogEntry[] | undefined; loading:
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 size={20} className="text-white/30 animate-spin mb-2" />
-        <p className="text-white/40 text-xs">加载日志...</p>
+        <Loader2 size={20} className="text-pc-text-faint animate-spin mb-2" />
+        <p className="text-pc-text-muted text-xs">加载日志...</p>
       </div>
     );
   }
@@ -164,8 +164,8 @@ function LogsTab({ logs, loading }: { logs: CronLogEntry[] | undefined; loading:
   if (!logs || logs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <FileText size={20} className="text-white/20 mb-2" />
-        <p className="text-white/40 text-xs">暂无日志</p>
+        <FileText size={20} className="text-pc-text-faint mb-2" />
+        <p className="text-pc-text-muted text-xs">暂无日志</p>
       </div>
     );
   }
@@ -173,7 +173,7 @@ function LogsTab({ logs, loading }: { logs: CronLogEntry[] | undefined; loading:
   return (
     <div className="space-y-2">
       {logs.slice().reverse().map((log, idx) => (
-        <div key={idx} className="p-3 rounded-xl bg-white/5 border border-white/10">
+        <div key={idx} className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${
               log.role === 'user' ? 'bg-blue-500/20 text-blue-400' :
@@ -183,12 +183,12 @@ function LogsTab({ logs, loading }: { logs: CronLogEntry[] | undefined; loading:
               {log.role}
             </span>
             {log.timestamp && (
-              <span className="text-[10px] text-white/30">
+              <span className="text-[10px] text-pc-text-faint">
                 {new Date(log.timestamp).toLocaleString()}
               </span>
             )}
           </div>
-          <pre className="text-[10px] text-white/50 whitespace-pre-wrap break-words font-mono max-h-32 overflow-y-auto">
+          <pre className="text-[10px] text-pc-text-muted whitespace-pre-wrap break-words font-mono max-h-32 overflow-y-auto">
             {log.content.slice(0, 500)}
             {log.content.length > 500 ? '...' : ''}
           </pre>
@@ -201,18 +201,18 @@ function LogsTab({ logs, loading }: { logs: CronLogEntry[] | undefined; loading:
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between py-1.5">
-      <span className="text-xs text-white/40">{label}</span>
-      <span className={`text-xs text-white/70 ${mono ? 'font-mono' : ''}`}>{value}</span>
+      <span className="text-xs text-pc-text-muted">{label}</span>
+      <span className={`text-xs text-pc-text-secondary ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
   );
 }
 
 function StatCard({ icon: Icon, label, value, color }: { icon: typeof Activity; label: string; value: string; color: string }) {
   return (
-    <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+    <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
       <div className="flex items-center gap-2 mb-1">
         <Icon size={14} className={color} />
-        <span className="text-[10px] text-white/40">{label}</span>
+        <span className="text-[10px] text-pc-text-muted">{label}</span>
       </div>
       <div className={`text-sm font-medium ${color}`}>{value}</div>
     </div>

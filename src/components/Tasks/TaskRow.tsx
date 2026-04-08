@@ -19,8 +19,8 @@ export function TaskRow({ job, isSelected, onSelect, onDelete }: Props) {
     <div
       className={`group rounded-xl border transition-all cursor-pointer ${
         isSelected
-          ? 'bg-white/10 border-white/20'
-          : 'bg-white/5 border-white/10 hover:border-white/15 hover:bg-white/[0.07]'
+          ? 'bg-[var(--pc-hover)] border-pc-border'
+          : 'bg-[var(--pc-bg-surface)] border-pc-border hover:border-[var(--pc-accent-dim)] hover:bg-[var(--pc-hover)]'
       }`}
       onClick={onSelect}
     >
@@ -38,20 +38,20 @@ export function TaskRow({ job, isSelected, onSelect, onDelete }: Props) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-medium text-white truncate">{job.name}</span>
+                <span className="text-sm font-medium text-pc-text truncate">{job.name}</span>
                 <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
                   health.status === 'failing' ? 'bg-red-500/10 text-red-400' :
                   health.status === 'upcoming' ? 'bg-amber-500/10 text-amber-400' :
-                  health.status === 'paused' ? 'bg-white/10 text-white/40' :
+                  health.status === 'paused' ? 'bg-[var(--pc-hover)] text-pc-text-muted' :
                   'bg-emerald-500/10 text-emerald-400'
                 }`}>
                   {statusLabel}
                 </span>
               </div>
-              <ChevronRight size={16} className={`shrink-0 transition-transform ${isSelected ? 'rotate-90' : ''} text-white/30`} />
+              <ChevronRight size={16} className={`shrink-0 transition-transform ${isSelected ? 'rotate-90' : ''} text-pc-text-faint`} />
             </div>
 
-            <div className="flex items-center gap-4 mt-2 text-xs text-white/40">
+            <div className="flex items-center gap-4 mt-2 text-xs text-pc-text-muted">
               {/* 调度规则 */}
               <span className="flex items-center gap-1 font-mono">
                 <Calendar size={12} />
@@ -83,10 +83,10 @@ export function TaskRow({ job, isSelected, onSelect, onDelete }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end mt-3 pt-3 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end mt-3 pt-3 border-t border-pc-border opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={e => { e.stopPropagation(); onDelete(); }}
-            className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-white/5 text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-[var(--pc-hover)] text-pc-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
           >
             <Trash2 size={12} />
             删除

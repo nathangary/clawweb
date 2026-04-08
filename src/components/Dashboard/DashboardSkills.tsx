@@ -30,19 +30,19 @@ export function DashboardSkills({ skills, onToggle, onOpenMarket }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium text-white">技能中心</h3>
+        <h3 className="text-lg font-medium text-pc-text">技能中心</h3>
         <div className="flex items-center gap-3">
           {onOpenMarket && (
             <button
               onClick={onOpenMarket}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-[var(--pc-accent)] hover:text-[var(--pc-accent-light)] hover:bg-[var(--pc-accent-glow)] transition-colors"
               title="前往技能市场"
             >
               <ExternalLink size={12} />
               <span>技能市场</span>
             </button>
           )}
-          <span className="text-sm text-white/40">
+          <span className="text-sm text-pc-text-muted">
             {skills.filter(s => s.enabled).length} / {skills.length} 已启用
           </span>
         </div>
@@ -56,18 +56,18 @@ export function DashboardSkills({ skills, onToggle, onOpenMarket }: Props) {
               key={idx}
               className={`p-4 rounded-xl border transition-all ${
                 skill.enabled
-                  ? 'bg-white/5 border-white/20'
-                  : 'bg-white/[0.02] border-white/5 opacity-60'
+                  ? 'bg-[var(--pc-bg-surface)] border-pc-border'
+                  : 'bg-[var(--pc-bg-base)] border-pc-border opacity-60'
               }`}
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2.5 rounded-xl ${skill.enabled ? 'bg-gradient-to-br from-violet-500 to-purple-600' : 'bg-white/5'}`}>
-                    <Icon size={18} className={skill.enabled ? 'text-white' : 'text-white/30'} />
+                  <div className={`p-2.5 rounded-xl ${skill.enabled ? 'bg-gradient-to-br from-violet-500 to-purple-600' : 'bg-[var(--pc-hover)]'}`}>
+                    <Icon size={18} className={skill.enabled ? 'text-white' : 'text-pc-text-muted'} />
                   </div>
                   <div>
-                    <h4 className="text-sm font-medium text-white">{skill.name}</h4>
-                    <span className={`text-xs ${skill.enabled ? 'text-violet-400' : 'text-white/30'}`}>
+                    <h4 className="text-sm font-medium text-pc-text">{skill.name}</h4>
+                    <span className={`text-xs ${skill.enabled ? 'text-violet-400' : 'text-pc-text-muted'}`}>
                       {skill.source}
                     </span>
                   </div>
@@ -75,7 +75,7 @@ export function DashboardSkills({ skills, onToggle, onOpenMarket }: Props) {
                 <button
                   onClick={() => handleToggle(skill.name, skill.enabled)}
                   className={`relative w-10 h-5 rounded-full transition-colors ${
-                    skill.enabled ? 'bg-violet-500' : 'bg-white/10'
+                    skill.enabled ? 'bg-violet-500' : 'bg-[var(--pc-border)]'
                   }`}
                 >
                   <span
@@ -90,7 +90,7 @@ export function DashboardSkills({ skills, onToggle, onOpenMarket }: Props) {
         })}
 
         {skills.length === 0 && (
-          <div className="col-span-full text-center py-12 text-white/40">
+          <div className="col-span-full text-center py-12 text-pc-text-muted">
             暂无技能数据
           </div>
         )}

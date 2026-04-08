@@ -25,11 +25,11 @@ export function DashboardChannels({ channels }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium text-white">渠道状态</h3>
+        <h3 className="text-lg font-medium text-pc-text">渠道状态</h3>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-white/40">在线</span>
+          <span className="text-sm text-pc-text-muted">在线</span>
           <span className="text-lg font-semibold text-emerald-400">{onlineCount}</span>
-          <span className="text-sm text-white/40">/ {channelList.length}</span>
+          <span className="text-sm text-pc-text-muted">/ {channelList.length}</span>
         </div>
       </div>
 
@@ -43,16 +43,16 @@ export function DashboardChannels({ channels }: Props) {
               key={name}
               className={`p-5 rounded-xl border transition-all ${
                 isConnected
-                  ? 'bg-white/5 border-white/20'
-                  : 'bg-white/[0.02] border-white/5'
+                  ? 'bg-[var(--pc-bg-surface)] border-pc-border'
+                  : 'bg-[var(--pc-bg-base)] border-pc-border'
               }`}
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2.5 rounded-xl ${isConnected ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : 'bg-white/5'}`}>
-                    <Icon size={18} className={isConnected ? 'text-white' : 'text-white/30'} />
+                  <div className={`p-2.5 rounded-xl ${isConnected ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : 'bg-[var(--pc-hover)]'}`}>
+                    <Icon size={18} className={isConnected ? 'text-white' : 'text-pc-text-muted'} />
                   </div>
-                  <span className="text-sm font-medium text-white capitalize">{name}</span>
+                  <span className="text-sm font-medium text-pc-text capitalize">{name}</span>
                 </div>
                 <div className={`flex items-center gap-1.5 text-xs ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
                   {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
@@ -61,7 +61,7 @@ export function DashboardChannels({ channels }: Props) {
               </div>
 
               {status.last_seen && (
-                <div className="text-xs text-white/30">
+                <div className="text-xs text-pc-text-muted">
                   最后活跃: {new Date(status.last_seen).toLocaleString()}
                 </div>
               )}
@@ -70,7 +70,7 @@ export function DashboardChannels({ channels }: Props) {
         })}
 
         {channelList.length === 0 && (
-          <div className="col-span-full text-center py-12 text-white/40">
+          <div className="col-span-full text-center py-12 text-pc-text-muted">
             暂无渠道数据
           </div>
         )}

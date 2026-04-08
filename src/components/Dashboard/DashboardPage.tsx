@@ -40,24 +40,23 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-[#0a0a0f] flex overflow-hidden">
+    <div className="fixed inset-0 z-[100] bg-[var(--pc-bg-base)] flex overflow-hidden">
       {/* 背景装饰 */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(99,102,241,0.15),transparent_50%),radial-gradient(ellipse_at_bottom_left,rgba(6,182,212,0.1),transparent_50%)]" />
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiMyMDIwMzEiIGZpbGwtb3BhY2l0eT0iMC4wNCI+PHBhdGggZD0iTTM2IDM0djJoLTJ2LTJoMnptLTQtNHYyaC0ydi0yaDJ6bTQtNHYyaC0ydi0yaDJ6Ii8+PC9nPjwvZz48L3N2Zz4=')] opacity-30" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(var(--pc-accent-rgb),0.08),transparent_50%),radial-gradient(ellipse_at_bottom_left,rgba(var(--pc-accent-rgb),0.05),transparent_50%)]" />
 
       {/* 左侧导航 */}
-      <nav className="relative w-56 flex flex-col border-r border-white/5 bg-black/20 backdrop-blur-xl">
+      <nav className="relative w-56 flex flex-col border-r border-pc-border bg-[var(--pc-bg-surface)]/80 backdrop-blur-xl">
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/5">
+        <div className="flex items-center gap-3 px-5 py-5 border-b border-pc-border">
           <div className="relative">
-            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-500 blur-lg opacity-50" />
-            <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center">
+            <div className="absolute -inset-2 rounded-xl bg-gradient-to-r from-[var(--pc-accent)] to-violet-500 blur-lg opacity-50 dark:opacity-50" />
+            <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--pc-accent)] to-violet-600 flex items-center justify-center">
               <Activity size={18} className="text-white" />
             </div>
           </div>
           <div>
-            <h1 className="font-semibold text-white text-sm">伯俊智能</h1>
-            <p className="text-[10px] text-white/40">监控面板</p>
+            <h1 className="font-semibold text-pc-text text-sm">伯俊智能</h1>
+            <p className="text-[10px] text-pc-text-muted">监控面板</p>
           </div>
         </div>
 
@@ -72,11 +71,11 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
                 onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? 'bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-white border-l-2 border-cyan-400'
-                    : 'text-white/50 hover:text-white hover:bg-white/5'
+                    ? 'bg-gradient-to-r from-[var(--pc-accent)]/20 to-violet-500/20 text-pc-text border-l-2 border-[var(--pc-accent)]'
+                    : 'text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)]'
                 }`}
               >
-                <Icon size={18} className={isActive ? 'text-cyan-400' : 'text-white/40'} />
+                <Icon size={18} className={isActive ? 'text-[var(--pc-accent)]' : 'text-pc-text-muted'} />
                 <span>{item.label}</span>
               </button>
             );
@@ -84,18 +83,18 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
         </div>
 
         {/* 底部操作 */}
-        <div className="p-3 border-t border-white/5">
+        <div className="p-3 border-t border-pc-border">
           <button
             onClick={handleReload}
             disabled={reloading || data.loading}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors disabled:opacity-50"
           >
             <RefreshCw size={14} className={reloading ? 'animate-spin' : ''} />
             <span>刷新配置</span>
           </button>
           <button
             onClick={onClose}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 mt-2 rounded-lg text-xs text-white/50 hover:text-white hover:bg-white/5 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 mt-2 rounded-lg text-xs text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors"
           >
             <Settings size={14} />
             <span>返回聊天</span>
@@ -106,13 +105,13 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
       {/* 右侧内容区 */}
       <main className="relative flex-1 flex flex-col overflow-hidden">
         {/* 顶部状态栏 */}
-        <header className="flex items-center justify-between h-14 px-6 border-b border-white/5 bg-black/10">
+        <header className="flex items-center justify-between h-14 px-6 border-b border-pc-border bg-[var(--pc-bg-surface)]/50">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-pc-text">
               {navItems.find(n => n.id === activeTab)?.label}
             </h2>
             {data.loading && (
-              <Loader2 size={16} className="text-cyan-400 animate-spin" />
+              <Loader2 size={16} className="text-[var(--pc-accent)] animate-spin" />
             )}
           </div>
           <div className="flex items-center gap-4">
@@ -121,9 +120,9 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-xs text-white/50">系统在线</span>
+              <span className="text-xs text-pc-text-muted">系统在线</span>
             </div>
-            <span className="text-xs text-white/30">
+            <span className="text-xs text-pc-text-faint">
               {data.lastUpdated ? `更新于 ${data.lastUpdated.toLocaleTimeString()}` : ''}
             </span>
           </div>
@@ -134,10 +133,10 @@ export function DashboardPage({ apiClient, onClose, onOpenSkillMarket, onOpenTas
           {data.error ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="text-red-400 text-lg mb-2">加载失败</div>
-              <p className="text-white/40 text-sm mb-4">{data.error}</p>
+              <p className="text-pc-text-muted text-sm mb-4">{data.error}</p>
               <button
                 onClick={fetchAll}
-                className="px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
+                className="px-4 py-2 rounded-lg bg-[var(--pc-accent)]/20 text-[var(--pc-accent)] hover:bg-[var(--pc-accent)]/30 transition-colors"
               >
                 重试
               </button>

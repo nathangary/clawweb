@@ -38,28 +38,28 @@ export function TaskFilters({
   return (
     <div className="flex flex-col gap-3 mb-4">
       <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-pc-text-muted" />
         <input
           type="text"
           value={search}
           onChange={e => onSearchChange(e.target.value)}
           placeholder="搜索任务名称..."
-          className="w-full pl-9 pr-4 py-2 text-sm rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-500/50 transition-colors"
+          className="w-full pl-9 pr-4 py-2 text-sm rounded-xl bg-[var(--pc-bg-surface)] border border-pc-border text-pc-text placeholder:text-pc-text-muted focus:outline-none focus:border-[var(--pc-accent-dim)] transition-colors"
         />
       </div>
 
       {/* 筛选和排序 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <Filter size={14} className="text-white/40 mr-1" />
+          <Filter size={14} className="text-pc-text-muted mr-1" />
           {filterOptions.map(opt => (
             <button
               key={opt.id}
               onClick={() => onFilterChange(opt.id)}
               className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 filter === opt.id
-                  ? 'bg-white/10 text-white'
-                  : 'text-white/40 hover:text-white hover:bg-white/5'
+                  ? 'bg-[var(--pc-hover)] text-pc-text'
+                  : 'text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)]'
               }`}
             >
               <span className={opt.color}>{opt.label}</span>
@@ -68,7 +68,7 @@ export function TaskFilters({
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-xs text-white/30">
+          <span className="text-xs text-pc-text-faint">
             {filteredCount === totalCount ? `${totalCount} 个任务` : `${filteredCount}/${totalCount}`}
           </span>
           <div className="flex items-center gap-1">
@@ -80,8 +80,8 @@ export function TaskFilters({
                   onClick={() => onSortChange(opt.id)}
                   className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
                     sortBy === opt.id
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/40 hover:text-white hover:bg-white/5'
+                      ? 'bg-[var(--pc-hover)] text-pc-text'
+                      : 'text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)]'
                   }`}
                 >
                   <Icon size={12} />

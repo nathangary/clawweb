@@ -10,7 +10,7 @@ interface DocumentPreviewProps {
   fullHeight?: boolean;
 }
 
-type FileType = 'markdown' | 'html' | 'image' | 'video' | 'other';
+type FileType = 'markdown' | 'html' | 'image' | 'video' | 'pdf' | 'other';
 
 function getFileType(fileName: string, mimeType?: string): FileType {
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
@@ -18,6 +18,7 @@ function getFileType(fileName: string, mimeType?: string): FileType {
   if (ext === 'md' || ext === 'txt' || mimeType === 'text/markdown' || mimeType === 'text/plain') return 'markdown';
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
   if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'video';
+  if (ext === 'pdf' || mimeType === 'application/pdf') return 'pdf';
   return 'other';
 }
 
@@ -35,6 +36,7 @@ function getFileLabel(fileType: FileType) {
     case 'html': return 'HTML';
     case 'image': return 'Image';
     case 'video': return 'Video';
+    case 'pdf': return 'PDF';
     default: return 'Document';
   }
 }
@@ -68,6 +70,7 @@ function getDownloadUrl(assetId: string): string {
 export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = false }: DocumentPreviewProps) {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [htmlSrc, setHtmlSrc] = useState<string | null>(null);
+  const [pdfSrc, setPdfSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -135,6 +138,9 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
       } else if (fileType === 'markdown' || fileType === 'other') {
         const text = await blob.text();
         setFileContent(text);
+      } else if (fileType === 'pdf') {
+        const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+        setPdfSrc(URL.createObjectURL(pdfBlob));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file');
@@ -148,6 +154,9 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
     return () => {
       if (htmlSrc) {
         URL.revokeObjectURL(htmlSrc);
+      }
+      if (pdfSrc) {
+        URL.revokeObjectURL(pdfSrc);
       }
     };
   }, [assetId]);
@@ -285,6 +294,16 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
             src={getDownloadUrl(assetId)}
           />
         </div>
+      );
+    }
+
+    if (fileType === 'pdf' && pdfSrc) {
+      return (
+        <iframe
+          src={pdfSrc}
+          className="w-full h-full border-0"
+          title={fileName}
+        />
       );
     }
 

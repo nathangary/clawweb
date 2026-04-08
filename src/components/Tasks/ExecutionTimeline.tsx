@@ -9,8 +9,8 @@ export function ExecutionTimeline({ logs }: Props) {
   if (logs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
-        <Clock size={20} className="text-white/20 mb-2" />
-        <p className="text-white/40 text-xs">暂无执行记录</p>
+        <Clock size={20} className="text-pc-text-faint mb-2" />
+        <p className="text-pc-text-muted text-xs">暂无执行记录</p>
       </div>
     );
   }
@@ -36,15 +36,15 @@ function TimelineNode({ group }: { group: LogGroup }) {
   const toolCalls = group.messages.flatMap(m => m.tool_calls || []);
 
   return (
-    <div className="rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+    <div className="rounded-xl bg-[var(--pc-bg-surface)] border border-pc-border overflow-hidden">
       <div className="p-3">
         <div className="flex items-center gap-2 mb-2">
           <div className={`w-2 h-2 rounded-full ${hasError ? 'bg-red-400' : 'bg-emerald-400'}`} />
-          <span className="text-xs text-white/60 font-mono">
+          <span className="text-xs text-pc-text-secondary font-mono">
             {firstMsg.timestamp ? new Date(firstMsg.timestamp).toLocaleString() : '未知时间'}
           </span>
           {duration !== null && (
-            <span className="text-[10px] text-white/30">({duration}s)</span>
+            <span className="text-[10px] text-pc-text-faint">({duration}s)</span>
           )}
           {hasError && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 flex items-center gap-1">
@@ -54,7 +54,7 @@ function TimelineNode({ group }: { group: LogGroup }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] text-white/40 mb-2">
+        <div className="flex items-center gap-2 text-[10px] text-pc-text-muted mb-2">
           <span className="flex items-center gap-1">
             <MessageSquare size={10} />
             {group.messages.length} 条消息
@@ -72,7 +72,7 @@ function TimelineNode({ group }: { group: LogGroup }) {
             <MessageItem key={i} msg={msg} />
           ))}
           {group.messages.length > 8 && (
-            <div className="text-[10px] text-white/30 text-center py-1">
+            <div className="text-[10px] text-pc-text-faint text-center py-1">
               +{group.messages.length - 8} 更多
             </div>
           )}
@@ -95,7 +95,7 @@ function MessageItem({ msg }: { msg: CronLogEntry }) {
       }`}>
         {msg.role === 'user' ? 'U' : hasToolCalls ? 'A' : 'T'}
       </span>
-      <span className="text-white/50 truncate flex-1">
+      <span className="text-pc-text-muted truncate flex-1">
         {msg.content.slice(0, 80)}{msg.content.length > 80 ? '...' : ''}
       </span>
     </div>

@@ -39,12 +39,13 @@ function categoryLabel(category: string): string {
   }
 }
 
-function getFileType(asset: AssetItem): 'markdown' | 'html' | 'image' | 'video' | 'other' {
+function getFileType(asset: AssetItem): 'markdown' | 'html' | 'image' | 'video' | 'pdf' | 'other' {
   const ext = asset.ext.toLowerCase();
   if (ext === 'html' || ext === 'htm') return 'html';
   if (ext === 'md' || ext === 'txt') return 'markdown';
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
   if (['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return 'video';
+  if (ext === 'pdf') return 'pdf';
   return 'other';
 }
 
@@ -79,6 +80,8 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [htmlSrc, setHtmlSrc] = useState<string | null>(null);
+  const [pdfSrc, setPdfSrc] = useState<string | null>(null);
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
 
   const headers = useMemo(() => {
     if (!fileContent || getFileType(selectedFile!) !== 'markdown') return [];
@@ -144,6 +147,8 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
     setSelectedFile(asset);
     setFileContent(null);
     if (htmlSrc) { URL.revokeObjectURL(htmlSrc); setHtmlSrc(null); }
+    if (pdfSrc) { URL.revokeObjectURL(pdfSrc); setPdfSrc(null); }
+    if (imgSrc) { URL.revokeObjectURL(imgSrc); setImgSrc(null); }
     const fileType = getFileType(asset);
     if (fileType === 'markdown' || fileType === 'html' || fileType === 'other') {
       try {
@@ -189,8 +194,25 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
         console.error('Failed to load file content:', error);
         setFileContent('加载文件内容失败');
       }
+    } else if (fileType === 'pdf') {
+      try {
+        const blob = await apiClient.downloadAsset(asset.id);
+        const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+        setPdfSrc(URL.createObjectURL(pdfBlob));
+      } catch (error) {
+        console.error('Failed to load PDF:', error);
+        setFileContent('加载 PDF 失败');
+      }
+    } else if (fileType === 'image') {
+      try {
+        const blob = await apiClient.downloadAsset(asset.id);
+        const imgBlob = new Blob([blob], { type: blob.type || 'image/*' });
+        setImgSrc(URL.createObjectURL(imgBlob));
+      } catch (error) {
+        console.error('Failed to load image:', error);
+      }
     }
-  }, [apiClient, htmlSrc]);
+  }, [apiClient, htmlSrc, pdfSrc, imgSrc]);
 
   const handleDownload = async () => {
     if (!selectedFile || downloading) return;
@@ -390,7 +412,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
                 删除
               </button>
               <button
-                onClick={() => { setSelectedFile(null); setFileContent(null); if (htmlSrc) { URL.revokeObjectURL(htmlSrc); setHtmlSrc(null); } }}
+                onClick={() => { setSelectedFile(null); setFileContent(null); if (htmlSrc) { URL.revokeObjectURL(htmlSrc); setHtmlSrc(null); } if (pdfSrc) { URL.revokeObjectURL(pdfSrc); setPdfSrc(null); } if (imgSrc) { URL.revokeObjectURL(imgSrc); setImgSrc(null); } }}
                 className="p-1.5 rounded-lg text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors"
               >
                 <X size={16} />
@@ -416,8 +438,8 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
             )}
             <div className={`flex-1 min-w-0 min-h-0 relative ${getFileType(selectedFile) === 'html' ? 'h-full overflow-hidden bg-white' : 'overflow-y-auto'}`}>
               {getFileType(selectedFile) === 'markdown' ? (
-                <div className="h-full w-full p-4 overflow-y-auto">
-                  <article className="prose prose-sm dark:prose-invert max-w-none">
+                <div className="h-full w-full p-4 overflow-y-auto bg-[var(--pc-bg-base)] text-[var(--pc-text-primary)]">
+                  <article className="prose prose-sm max-w-none [&_*]:text-[var(--pc-text-primary)]">
                     <LazyMarkdown components={{
                       h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
                       h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
@@ -436,12 +458,14 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
                   title={selectedFile.name}
                 />
               ) : getFileType(selectedFile) === 'image' ? (
-                <div className="flex items-center justify-center h-full p-4">
-                  <img
-                    src={`${apiClient.getBaseUrl().replace('/api', '')}/v1/admin/assets/${selectedFile.id}/download`}
-                    alt={selectedFile.name}
-                    className="max-w-full max-h-full object-contain rounded-xl"
-                  />
+                <div className="flex items-center justify-center h-full p-4 bg-[var(--pc-bg-base)]">
+                  {imgSrc && (
+                    <img
+                      src={imgSrc}
+                      alt={selectedFile.name}
+                      className="max-w-full max-h-full object-contain rounded-xl"
+                    />
+                  )}
                 </div>
               ) : getFileType(selectedFile) === 'video' ? (
                 <div className="flex items-center justify-center h-full p-4">
@@ -451,6 +475,12 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
                     src={`${apiClient.getBaseUrl().replace('/api', '')}/v1/admin/assets/${selectedFile.id}/download`}
                   />
                 </div>
+              ) : getFileType(selectedFile) === 'pdf' && pdfSrc ? (
+                <iframe
+                  src={pdfSrc}
+                  className="w-full h-full border-0"
+                  title={selectedFile.name}
+                />
               ) : (
                 <pre className="text-xs text-pc-text-muted whitespace-pre-wrap font-mono bg-[var(--pc-bg-base)] p-4 rounded-xl border border-pc-border">
                   {fileContent || '无法预览此文件类型'}

@@ -71,7 +71,7 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                   onTabChange(stat.tab);
                 }
               }}
-              className="relative group p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-white/20 transition-all text-left overflow-hidden"
+              className="relative group p-4 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border hover:border-[var(--pc-accent-dim)] transition-all text-left overflow-hidden"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-10 transition-opacity`} />
               <div className="relative">
@@ -79,10 +79,10 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                   <div className={`p-2 rounded-lg bg-gradient-to-br ${stat.color}`}>
                     <Icon size={16} className="text-white" />
                   </div>
-                  <span className="text-2xl font-bold text-white">{stat.value}</span>
+                  <span className="text-2xl font-bold text-pc-text">{stat.value}</span>
                 </div>
-                <div className="text-sm text-white/60">{stat.title}</div>
-                <div className="text-xs text-white/40 mt-0.5">{stat.label}</div>
+                <div className="text-sm text-pc-text-secondary">{stat.title}</div>
+                <div className="text-xs text-pc-text-muted mt-0.5">{stat.label}</div>
               </div>
             </button>
           );
@@ -91,8 +91,8 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-            <h3 className="text-sm font-medium text-white/80 mb-4 flex items-center gap-2">
+          <div className="p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+            <h3 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
               <BarChart3 size={16} className="text-cyan-400" />
               任务执行趋势
             </h3>
@@ -102,25 +102,26 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                   <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
                     <XAxis
                       dataKey="name"
-                      tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+                      tick={{ fill: 'var(--pc-text-muted)', fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
                     />
                     <YAxis
-                      tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+                      tick={{ fill: 'var(--pc-text-muted)', fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
                       width={30}
                     />
                     <Tooltip
                       contentStyle={{
-                        background: 'rgba(20,20,30,0.95)',
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'var(--pc-bg-elevated)',
+                        border: '1px solid var(--pc-border)',
                         borderRadius: '12px',
                         backdropFilter: 'blur(12px)',
                         fontSize: '12px',
+                        color: 'var(--pc-text-primary)',
                       }}
-                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                      cursor={{ fill: 'var(--pc-hover)' }}
                     />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={32}>
                       {chartData.map((entry, idx) => (
@@ -129,40 +130,40 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-white/40">
+                <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-pc-text-muted">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500/60" /> 成功</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-500/60" /> 失败</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-white/10" /> 未执行</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-[var(--pc-border)]" /> 未执行</span>
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-32 text-white/30 text-sm">
+              <div className="flex items-center justify-center h-32 text-pc-text-muted text-sm">
                 暂无执行数据
               </div>
             )}
           </div>
 
-          <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-            <h3 className="text-sm font-medium text-white/80 mb-4 flex items-center gap-2">
+          <div className="p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+            <h3 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
               <Target size={16} className="text-amber-400" />
               最近任务
             </h3>
             <div className="space-y-2">
               {data.cronJobs.slice(0, 5).map((job, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
+                <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[var(--pc-bg-base)]">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${job.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-white/20'}`} />
+                    <div className={`w-2 h-2 rounded-full ${job.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-[var(--pc-border)]'}`} />
                     <div>
-                      <span className="text-sm text-white/80">{job.name}</span>
-                      <span className="text-xs text-white/40 ml-2 font-mono">{job.schedule.expr || job.schedule.kind}</span>
+                      <span className="text-sm text-pc-text-secondary">{job.name}</span>
+                      <span className="text-xs text-pc-text-muted ml-2 font-mono">{job.schedule.expr || job.schedule.kind}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {job.state.last_status === 'ok' && <CheckCircle size={14} className="text-emerald-400" />}
                     {job.state.last_status === 'error' && <XCircle size={14} className="text-red-400" />}
-                    {!job.state.last_status && <Clock size={14} className="text-white/30" />}
+                    {!job.state.last_status && <Clock size={14} className="text-pc-text-faint" />}
                     {job.state.next_run_at && (
-                      <span className="text-xs text-white/40">
+                      <span className="text-xs text-pc-text-muted">
                         {getTimeUntil(job.state.next_run_at)}
                       </span>
                     )}
@@ -170,15 +171,15 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                 </div>
               ))}
               {data.cronJobs.length === 0 && (
-                <p className="text-sm text-white/40 text-center py-4">暂无任务</p>
+                <p className="text-sm text-pc-text-muted text-center py-4">暂无任务</p>
               )}
             </div>
           </div>
         </div>
 
         <div className="space-y-6">
-          <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-            <h3 className="text-sm font-medium text-white/80 mb-4 flex items-center gap-2">
+          <div className="p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+            <h3 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
               <Gauge size={16} className="text-violet-400" />
               系统状态
             </h3>
@@ -188,14 +189,14 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                 const isHealthy = item.status === 'healthy';
                 const isUnknown = item.status === 'unknown';
                 return (
-                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
+                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[var(--pc-bg-base)]">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${isHealthy ? 'bg-emerald-500/20' : isUnknown ? 'bg-white/10' : 'bg-amber-500/20'}`}>
-                        <Icon size={14} className={isHealthy ? 'text-emerald-400' : isUnknown ? 'text-white/40' : 'text-amber-400'} />
+                      <div className={`p-2 rounded-lg ${isHealthy ? 'bg-emerald-500/20' : isUnknown ? 'bg-[var(--pc-hover)]' : 'bg-amber-500/20'}`}>
+                        <Icon size={14} className={isHealthy ? 'text-emerald-400' : isUnknown ? 'text-pc-text-muted' : 'text-amber-400'} />
                       </div>
-                      <span className="text-sm text-white/70">{item.name}</span>
+                      <span className="text-sm text-pc-text-secondary">{item.name}</span>
                     </div>
-                    <span className={`text-xs ${isHealthy ? 'text-emerald-400' : isUnknown ? 'text-white/40' : 'text-amber-400'}`}>
+                    <span className={`text-xs ${isHealthy ? 'text-emerald-400' : isUnknown ? 'text-pc-text-muted' : 'text-amber-400'}`}>
                       {isHealthy ? '正常' : isUnknown ? '未知' : item.status === 'unhealthy' ? '异常' : '降级'}
                     </span>
                   </div>
@@ -204,15 +205,15 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
             </div>
           </div>
 
-          <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-            <h3 className="text-sm font-medium text-white/80 mb-4 flex items-center gap-2">
+          <div className="p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+            <h3 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
               <Zap size={16} className="text-cyan-400" />
               渠道状态
             </h3>
             <div className="space-y-2">
               {Object.entries(data.channels).map(([name, status]) => (
-                <div key={name} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
-                  <span className="text-sm text-white/70 capitalize">{name}</span>
+                <div key={name} className="flex items-center justify-between p-3 rounded-xl bg-[var(--pc-bg-base)]">
+                  <span className="text-sm text-pc-text-secondary capitalize">{name}</span>
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${status.status === 'connected' ? 'bg-emerald-400' : 'bg-red-400'} ${status.status === 'connected' ? 'animate-pulse' : ''}`} />
                     <span className={`text-xs ${status.status === 'connected' ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -222,13 +223,13 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                 </div>
               ))}
               {Object.keys(data.channels).length === 0 && (
-                <p className="text-sm text-white/40 text-center py-4">暂无渠道</p>
+                <p className="text-sm text-pc-text-muted text-center py-4">暂无渠道</p>
               )}
             </div>
           </div>
 
-          <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
-            <h3 className="text-sm font-medium text-white/80 mb-4 flex items-center gap-2">
+          <div className="p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
+            <h3 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
               <Activity size={16} className="text-emerald-400" />
               快捷操作
             </h3>
@@ -239,10 +240,10 @@ export function DashboardOverview({ data, onTabChange, onOpenTasks }: Props) {
                   <button
                     key={idx}
                     onClick={action.action}
-                    className="flex flex-col items-center gap-2 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
+                    className="flex flex-col items-center gap-2 p-3 rounded-xl bg-[var(--pc-bg-base)] hover:bg-[var(--pc-hover)] transition-colors"
                   >
                     <Icon size={18} className="text-cyan-400" />
-                    <span className="text-xs text-white/60">{action.label}</span>
+                    <span className="text-xs text-pc-text-secondary">{action.label}</span>
                   </button>
                 );
               })}
