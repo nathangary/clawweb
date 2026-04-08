@@ -111,6 +111,9 @@ export interface RuleFlowNode {
   label: string;
   condition?: string;
   loopConfig?: { maxIterations: number; condition: string };
+  index?: number;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 }
 
 export interface RuleFlowEdge {
@@ -118,6 +121,7 @@ export interface RuleFlowEdge {
   source: string;
   target: string;
   label?: string;
+  condition?: string;
 }
 
 export interface RuleFlowGraph {
@@ -129,6 +133,9 @@ export interface RuleSkillRef {
   skillId: string;
   name: string;
   params: Record<string, unknown>;
+  desc?: string;
+  inputExample?: Record<string, unknown>;
+  outputExample?: Record<string, unknown>;
 }
 
 export interface Rule {
@@ -138,6 +145,7 @@ export interface Rule {
   status: 'active' | 'draft' | 'disabled';
   triggerType: 'manual' | 'cron' | 'webhook';
   triggerConfig?: string;
+  variables?: Record<string, unknown>;
   runCount: number;
   successRate: number;
   lastRunAt?: string;

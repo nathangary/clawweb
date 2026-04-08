@@ -229,12 +229,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                   label: node.label || node.name || skillRef?.name || '未命名',
                   skillId: node.skillId,
                   skillName: skillRef?.name || node.skillName || '',
+                  index: node.index,
+                  condition: node.expression || node.condition,
+                  input: node.input,
+                  output: node.output,
                 };
               });
             };
 
             const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
-              const validEdges = edges.filter(e => e.from && e.to);
+              const validEdges = edges.filter(e => (e.from && e.to) || (e.source && e.target));
               if (validEdges.length === 0 && normalizedNodes.length > 1) {
                 const result: any[] = [];
                 for (let i = 0; i < normalizedNodes.length - 1; i++) {
@@ -271,6 +275,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
               status: 'draft',
               triggerType: normalizeTriggerType(ruleData.triggerType),
               triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig),
+              variables: ruleData.variables || {},
               runCount: 0,
               successRate: 0,
               createdAt: new Date().toISOString(),
@@ -543,12 +548,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                   label: node.label || node.name || skillRef?.name || '未命名',
                   skillId: node.skillId,
                   skillName: skillRef?.name || node.skillName || '',
+                  index: node.index,
+                  condition: node.expression || node.condition,
+                  input: node.input,
+                  output: node.output,
                 };
               });
             };
 
             const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
-              const validEdges = edges.filter(e => e.from && e.to);
+              const validEdges = edges.filter(e => (e.from && e.to) || (e.source && e.target));
               if (validEdges.length === 0 && normalizedNodes.length > 1) {
                 const result: any[] = [];
                 for (let i = 0; i < normalizedNodes.length - 1; i++) {

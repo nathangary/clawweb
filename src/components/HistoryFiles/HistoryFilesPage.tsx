@@ -151,23 +151,6 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
         const text = await blob.text();
         setFileContent(text);
         if (fileType === 'html') {
-          const injectStyles = `
-<style>
-  html, body { margin: 0; padding: 0; height: 100vh; overflow: auto; }
-  /* Override fixed heights on chart containers */
-  [id*="chart"], [class*="chart"], [id*="echarts"], [class*="echarts"],
-  [id*="canvas"], [class*="canvas"], svg, canvas {
-    width: 100% !important;
-    height: 100vh !important;
-    min-height: 100vh !important;
-  }
-  /* Common chart library containers */
-  .echarts, #echarts, .chart-container, .chart-wrapper,
-  [data-chart], .recharts-wrapper, .recharts-surface {
-    width: 100% !important;
-    height: 100vh !important;
-  }
-</style>`;
           const injectScript = `
 <script>
   (function() {
@@ -194,11 +177,6 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
   })();
 </script>`;
           let modifiedHtml = text;
-          if (modifiedHtml.includes('</head>')) {
-            modifiedHtml = modifiedHtml.replace('</head>', injectStyles + '</head>');
-          } else {
-            modifiedHtml = injectStyles + modifiedHtml;
-          }
           if (modifiedHtml.includes('</body>')) {
             modifiedHtml = modifiedHtml.replace('</body>', injectScript + '</body>');
           } else {
@@ -436,7 +414,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
                 ))}
               </div>
             )}
-            <div className={`flex-1 min-w-0 min-h-0 relative ${getFileType(selectedFile) === 'html' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+            <div className={`flex-1 min-w-0 min-h-0 relative ${getFileType(selectedFile) === 'html' ? 'h-full overflow-hidden bg-white' : 'overflow-y-auto'}`}>
               {getFileType(selectedFile) === 'markdown' ? (
                 <div className="h-full w-full p-4 overflow-y-auto">
                   <article className="prose prose-sm dark:prose-invert max-w-none">
@@ -453,7 +431,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
               ) : getFileType(selectedFile) === 'html' ? (
                 <iframe
                   src={htmlSrc || undefined}
-                  className="absolute inset-0 w-full h-full border-0 bg-white"
+                  className="w-full h-full border-0 bg-white"
                   sandbox="allow-scripts"
                   title={selectedFile.name}
                 />

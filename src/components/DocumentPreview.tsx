@@ -98,21 +98,6 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
 
       if (fileType === 'html') {
         const text = await blob.text();
-        const injectStyles = `
-<style>
-  html, body { margin: 0; padding: 0; height: 100vh; overflow: auto; }
-  [id*="chart"], [class*="chart"], [id*="echarts"], [class*="echarts"],
-  [id*="canvas"], [class*="canvas"], svg, canvas {
-    width: 100% !important;
-    height: 100vh !important;
-    min-height: 100vh !important;
-  }
-  .echarts, #echarts, .chart-container, .chart-wrapper,
-  [data-chart], .recharts-wrapper, .recharts-surface {
-    width: 100% !important;
-    height: 100vh !important;
-  }
-</style>`;
         const injectScript = `
 <script>
   (function() {
@@ -139,11 +124,6 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
   })();
 </script>`;
         let modifiedHtml = text;
-        if (modifiedHtml.includes('</head>')) {
-          modifiedHtml = modifiedHtml.replace('</head>', injectStyles + '</head>');
-        } else {
-          modifiedHtml = injectStyles + modifiedHtml;
-        }
         if (modifiedHtml.includes('</body>')) {
           modifiedHtml = modifiedHtml.replace('</body>', injectScript + '</body>');
         } else {
