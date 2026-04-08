@@ -1233,11 +1233,11 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
   const validEdges = flow.edges.filter(e => e.source && e.target);
   const conditionEdges = validEdges.filter(e => e.label);
 
-  const nodeConfig: Record<string, { icon: typeof Bot; gradient: string; border: string; glow: string; accent: string; bgLight: string }> = {
-    start: { icon: Circle, gradient: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', glow: 'shadow-emerald-500/10', accent: 'text-emerald-400', bgLight: 'bg-emerald-500/10' },
-    end: { icon: Square, gradient: 'from-zinc-500/20 to-zinc-500/5', border: 'border-zinc-500/40', glow: 'shadow-zinc-500/10', accent: 'text-zinc-400', bgLight: 'bg-zinc-500/10' },
-    condition: { icon: GitFork, gradient: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', glow: 'shadow-amber-500/10', accent: 'text-amber-400', bgLight: 'bg-amber-500/10' },
-    skill: { icon: Bot, gradient: 'from-cyan-500/20 to-violet-500/10', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/10', accent: 'text-cyan-400', bgLight: 'bg-cyan-500/10' },
+  const nodeConfig: Record<string, { icon: typeof Bot; gradient: string; border: string; glow: string; accent: string }> = {
+    start: { icon: Circle, gradient: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', glow: 'shadow-emerald-500/10', accent: 'text-emerald-400' },
+    end: { icon: Square, gradient: 'from-zinc-500/20 to-zinc-500/5', border: 'border-zinc-500/40', glow: 'shadow-zinc-500/10', accent: 'text-zinc-400' },
+    condition: { icon: GitFork, gradient: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', glow: 'shadow-amber-500/10', accent: 'text-amber-400' },
+    skill: { icon: Bot, gradient: 'from-cyan-500/20 to-violet-500/10', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/10', accent: 'text-cyan-400' },
   };
 
   return (
@@ -1251,7 +1251,7 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
 
           return (
             <div key={node.id} className="relative">
-              <div className={`relative group rounded-2xl border bg-gradient-to-br ${cfg.gradient} ${cfg.border} shadow-lg ${cfg.glow} backdrop-blur-sm transition-all duration-300`}>
+              <div className={`relative group rounded-2xl border bg-gradient-to-br ${cfg.gradient} ${cfg.border} shadow-lg ${cfg.glow} backdrop-blur-sm transition-all duration-300 dark:bg-[var(--pc-bg-surface)]`}>
                 <div className="flex items-center gap-4 p-4">
                   <div className={`relative w-12 h-12 rounded-xl bg-gradient-to-br ${cfg.gradient} ${cfg.border} border flex items-center justify-center shrink-0`}>
                     <Icon size={20} className={cfg.accent} />
@@ -1294,9 +1294,9 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
               {!isLast && (
                 <div className="flex justify-center py-2">
                   <div className="relative flex flex-col items-center">
-                    <div className="w-px h-6 bg-gradient-to-b from-[var(--pc-border-strong)] to-transparent" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--pc-border-strong)] -mt-0.5" />
-                    <div className="w-px h-6 bg-gradient-to-b from-transparent to-[var(--pc-border-strong)]" />
+                    <div className="w-px h-6 bg-gradient-to-b from-[var(--pc-border)] to-transparent dark:from-[var(--pc-border-strong)]" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--pc-border)] -mt-0.5 dark:bg-[var(--pc-border-strong)]" />
+                    <div className="w-px h-6 bg-gradient-to-b from-transparent to-[var(--pc-border)] dark:from-transparent dark:to-[var(--pc-border-strong)]" />
                   </div>
                 </div>
               )}
