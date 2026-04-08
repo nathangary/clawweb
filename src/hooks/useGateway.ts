@@ -66,21 +66,26 @@ export function useGateway() {
       const toolHint = event.metadata?._tool_hint;
 
       setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === 'assistant' && last.isStreaming && last.runId === event.eventId) {
-          const updated = { ...last };
-          if (text) updated.content = text;
-          const blocks: MessageBlock[] = [];
-          if (toolHint) {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const m = prev[i];
+          if (m.role === 'assistant' && m.isStreaming) {
+            const updated = { ...m };
+            if (text) updated.content = text;
+            const blocks: MessageBlock[] = [];
+            if (toolHint) {
+              const toolInfo = extractToolInfo(toolHint);
+              if (toolInfo) {
+                blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
+              }
             }
+            if (text) blocks.push({ type: 'text', text });
+            updated.blocks = blocks;
+            const updatedMsgs: ChatMessage[] = [...prev];
+            updatedMsgs[i] = updated;
+            return updatedMsgs;
           }
-          if (text) blocks.push({ type: 'text', text });
-          updated.blocks = blocks;
-          return [...prev.slice(0, -1), updated];
         }
+        if (currentEventIdRef.current === null) return prev;
         const blocks: MessageBlock[] = [];
         if (toolHint) {
           const toolInfo = extractToolInfo(toolHint);
@@ -118,6 +123,7 @@ export function useGateway() {
               }
               return [...prev.slice(0, -1), updated];
             }
+            if (currentEventIdRef.current === null) return prev;
             const msg: ChatMessage = {
               id: event.eventId,
               role: 'assistant',
@@ -170,16 +176,20 @@ export function useGateway() {
 
       if (event.content || newImageBlocks.length > 0 || multimodalResponse) {
         setMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === 'assistant' && last.isStreaming) {
-            const mergedBlocks = [...last.blocks, ...newImageBlocks];
-            return [...prev.slice(0, -1), { 
-              ...last, 
-              isStreaming: false, 
-              content: event.content,
-              blocks: mergedBlocks.length > 0 ? mergedBlocks : last.blocks,
-              multimodalResponse,
-            }];
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if (m.role === 'assistant' && m.isStreaming) {
+              const mergedBlocks = [...m.blocks, ...newImageBlocks];
+              const updated: ChatMessage[] = [...prev];
+              updated[i] = {
+                ...m,
+                isStreaming: false,
+                content: event.content,
+                blocks: mergedBlocks.length > 0 ? mergedBlocks : m.blocks,
+                multimodalResponse,
+              };
+              return updated;
+            }
           }
           const blocks: MessageBlock[] = [...newImageBlocks, { type: 'text' as const, text: event.content }];
           return [...prev, {
@@ -194,9 +204,13 @@ export function useGateway() {
         });
       } else {
         setMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === 'assistant' && last.isStreaming) {
-            return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if (m.role === 'assistant' && m.isStreaming) {
+              const updated: ChatMessage[] = [...prev];
+              updated[i] = { ...m, isStreaming: false };
+              return updated;
+            }
           }
           return prev;
         });
@@ -205,9 +219,13 @@ export function useGateway() {
       currentEventIdRef.current = null;
       setIsGenerating(false);
       setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === 'assistant' && last.isStreaming) {
-          return [...prev.slice(0, -1), { ...last, isStreaming: false }];
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const m = prev[i];
+          if (m.role === 'assistant' && m.isStreaming) {
+            const updated: ChatMessage[] = [...prev];
+            updated[i] = { ...m, isStreaming: false };
+            return updated;
+          }
         }
         return [...prev, {
           id: 'error-' + Date.now(),
