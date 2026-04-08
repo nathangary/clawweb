@@ -19,6 +19,20 @@ export interface NanobotInboundMessage {
   ts?: string;
 }
 
+export interface NanobotMediaItem {
+  type: string;
+  source: string;
+  url?: string;
+  asset_id?: string;
+  mime_type?: string;
+}
+
+export interface NanobotMultimodalResponse {
+  format: string;
+  content: string;
+  media?: NanobotMediaItem[];
+}
+
 export interface NanobotOutboundEvent {
   eventId: string;
   eventType: 'progress' | 'tool_hint' | 'final' | 'error';
@@ -26,7 +40,9 @@ export interface NanobotOutboundEvent {
   chatId: string;
   sessionKey: string;
   content: string;
-  media?: string[];
+  media?: string[] | NanobotMediaItem[];
+  multimodalResponse?: NanobotMultimodalResponse;
+  multimodal_response?: NanobotMultimodalResponse;
   metadata?: Record<string, unknown>;
   done: boolean;
   ts: string;

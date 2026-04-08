@@ -3,7 +3,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { LazyMarkdown } from './LazyMarkdown';
 import { HtmlPreview, extractHtmlPath } from './HtmlPreview';
-import { DocumentPreview, extractDocuments } from './DocumentPreview';
+import { DocumentPreview, extractDocuments, extractImages } from './DocumentPreview';
 import type { ChatMessage as ChatMessageType, MessageBlock } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -11,7 +11,6 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import { CodeBlock } from './CodeBlock';
 import { ToolCall } from './ToolCall';
 import { ImageBlock } from './ImageBlock';
-import { buildImageSrc } from '../lib/image';
 import { copyToClipboard } from '../lib/clipboard';
 import { Bot, User, Wrench, Copy, Check, CheckCheck, RefreshCw, Zap, Info, Webhook, Braces, Clock, AlertCircle, Bookmark, ChevronDown, Reply } from 'lucide-react';
 import { t, getLocale } from '../lib/i18n';
@@ -158,15 +157,6 @@ function renderTextBlocks(blocks: MessageBlock[]) {
       </LazyMarkdown>
     </div>
   ));
-}
-
-function renderImageBlocks(blocks: MessageBlock[]) {
-  return getImageBlocks(blocks).map((block, i) => {
-    const b = block as { type: 'image'; mediaType: string; data?: string; url?: string };
-    const src = buildImageSrc(b.mediaType, b.data, b.url);
-    if (!src) return null;
-    return <ImageBlock key={`img-${i}`} src={src} alt="Image" />;
-  });
 }
 
 function renderInternalBlocks(blocks: MessageBlock[]) {
@@ -539,7 +529,9 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
             )
           )}
 
-          {renderImageBlocks(message.blocks)}
+          {message.multimodalResponse && extractImages(message.multimodalResponse).map((img, i) => (
+            <ImageBlock key={`img-${i}`} src={`/api/v1/admin/assets/${img.assetId}/download`} alt={img.fileName} />
+          ))}
 
           {extractHtmlPath(message.content || '') && (
             <HtmlPreview filePath={extractHtmlPath(message.content || '') as string} />

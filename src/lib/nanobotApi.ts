@@ -7,6 +7,7 @@ export interface NanobotApiResponse<T = unknown> {
 
 export interface NanobotSession {
   key: string;
+  display_key?: string;
   created_at?: string;
   updated_at?: string;
   message_count?: number;

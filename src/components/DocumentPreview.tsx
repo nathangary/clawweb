@@ -344,11 +344,24 @@ export function extractDocuments(multimodalResponse: { media?: Array<{ type?: st
   if (!multimodalResponse?.media) return [];
   
   return multimodalResponse.media
-    .filter(m => m.type === 'document' && m.asset_id)
+    .filter(m => m.type === 'document' && m.asset_id && m.mime_type !== 'image/png' && m.mime_type !== 'image/jpeg' && m.mime_type !== 'image/gif' && m.mime_type !== 'image/webp' && m.mime_type !== 'image/svg+xml')
     .map(m => ({
       assetId: m.asset_id!,
       url: m.url,
       fileName: m.url ? m.url.split('/').pop() || 'document' : 'document',
+      mimeType: m.mime_type,
+    }));
+}
+
+export function extractImages(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): DocumentInfo[] {
+  if (!multimodalResponse?.media) return [];
+  
+  return multimodalResponse.media
+    .filter(m => m.asset_id && (m.type === 'image' || m.mime_type === 'image/png' || m.mime_type === 'image/jpeg' || m.mime_type === 'image/gif' || m.mime_type === 'image/webp' || m.mime_type === 'image/svg+xml'))
+    .map(m => ({
+      assetId: m.asset_id!,
+      url: m.url,
+      fileName: m.url ? m.url.split('/').pop() || 'image' : 'image',
       mimeType: m.mime_type,
     }));
 }

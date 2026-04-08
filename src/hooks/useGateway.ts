@@ -3,7 +3,7 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { getStoredCredentials } from '../lib/credentials';
 import { genId } from '../lib/utils';
 import type { ChatMessage, MessageBlock, Session } from '../types';
-import type { NanobotOutboundEvent } from '../lib/nanobotGateway';
+import type { NanobotOutboundEvent, NanobotMediaItem } from '../lib/nanobotGateway';
 
 export function useGateway() {
   const status = useConnectionStore(s => s.status);
@@ -143,25 +143,32 @@ export function useGateway() {
       currentEventIdRef.current = null;
       setIsGenerating(false);
 
-      const processMedia = (media?: string[]): MessageBlock[] => {
+      const processMedia = (media?: string[] | NanobotMediaItem[]): MessageBlock[] => {
         if (!media || !Array.isArray(media)) return [];
         const blocks: MessageBlock[] = [];
-        for (const path of media) {
-          if (path.startsWith('data:')) {
-            const match = path.match(/^data:([^;]+);base64,(.+)$/);
-            if (match) {
-              blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
+        for (const item of media) {
+          if (typeof item === 'string') {
+            if (item.startsWith('data:')) {
+              const match = item.match(/^data:([^;]+);base64,(.+)$/);
+              if (match) {
+                blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
+              }
+            } else if (item.startsWith('http')) {
+              blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: item });
             }
-          } else if (path.startsWith('http')) {
-            blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: path });
+          } else if (item.type === 'image' && item.asset_id) {
+            blocks.push({ type: 'image' as const, mediaType: item.mime_type || 'image/jpeg', url: `/api/v1/admin/assets/${item.asset_id}/download` });
+          } else if (item.type === 'image' && item.url) {
+            blocks.push({ type: 'image' as const, mediaType: item.mime_type || 'image/jpeg', url: item.url });
           }
         }
         return blocks;
       };
 
       const newImageBlocks = processMedia(event.media);
+      const multimodalResponse = event.multimodalResponse || event.multimodal_response;
 
-      if (event.content || newImageBlocks.length > 0) {
+      if (event.content || newImageBlocks.length > 0 || multimodalResponse) {
         setMessages(prev => {
           const last = prev[prev.length - 1];
           if (last && last.role === 'assistant' && last.isStreaming) {
@@ -170,10 +177,20 @@ export function useGateway() {
               ...last, 
               isStreaming: false, 
               content: event.content,
-              blocks: mergedBlocks.length > 0 ? mergedBlocks : last.blocks
+              blocks: mergedBlocks.length > 0 ? mergedBlocks : last.blocks,
+              multimodalResponse,
             }];
           }
-          return prev;
+          const blocks: MessageBlock[] = [...newImageBlocks, { type: 'text' as const, text: event.content }];
+          return [...prev, {
+            id: event.eventId,
+            role: 'assistant' as const,
+            content: event.content,
+            timestamp: Date.now(),
+            blocks,
+            isStreaming: false,
+            multimodalResponse,
+          }];
         });
       } else {
         setMessages(prev => {
@@ -184,7 +201,6 @@ export function useGateway() {
           return prev;
         });
       }
-      loadHistory(activeSessionRef.current);
     } else if (event.eventType === 'error') {
       currentEventIdRef.current = null;
       setIsGenerating(false);
@@ -221,7 +237,7 @@ export function useGateway() {
       if (res.applied && res.data.sessions) {
         setSessions(res.data.sessions.map(s => ({
           key: s.key,
-          label: s.key,
+          label: s.display_key || s.key,
           messageCount: s.message_count || s.messageCount,
         })));
       }
