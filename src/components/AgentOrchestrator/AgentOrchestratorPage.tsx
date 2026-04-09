@@ -5,6 +5,12 @@ import type { NanobotApiClient } from '../../lib/nanobotApi';
 import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
 import { ToastContainer, type Toast } from '../Toast';
 import { CardSkeleton } from '../Skeleton';
+import { LazyMarkdown } from '../LazyMarkdown';
+import { CodeBlock } from '../CodeBlock';
+import { ThinkingBlock } from '../ThinkingBlock';
+import { ToolCall } from '../ToolCall';
+import { DocumentPreview, extractDocuments, extractImages, type DocumentInfo } from '../DocumentPreview';
+import { ImageBlock } from '../ImageBlock';
 
 interface GenerationMessage {
   id: string;
@@ -15,6 +21,8 @@ interface GenerationMessage {
 }
 
 const RULE_SYSTEM_PROMPT = `请用agent-builder技能帮我生成流程规则`;
+
+const TEST_RUN_PROMPT = `请用agent-process技能帮我执行规则`;
 
 interface MonitorStats {
   active: number;
@@ -52,6 +60,13 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'draft' | 'disabled'>('all');
+  const [showTestRun, setShowTestRun] = useState(false);
+  const [testRunRule, setTestRunRule] = useState<Rule | null>(null);
+  const [isTestRunning, setIsTestRunning] = useState(false);
+  const [testRunMessages, setTestRunMessages] = useState<GenerationMessage[]>([]);
+  const [testRunReport, setTestRunReport] = useState<string | null>(null);
+  const [testRunDocs, setTestRunDocs] = useState<DocumentInfo[]>([]);
+  const [testRunImages, setTestRunImages] = useState<DocumentInfo[]>([]);
   const eventHandlerRef = useRef<(() => void) | null>(null);
 
   const dismissToast = useCallback((id: string) => {
@@ -418,6 +433,102 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     eventHandlerRef.current = unsubscribe;
   };
 
+  const openTestRunModal = (rule: Rule) => {
+    setTestRunMessages([]);
+    setTestRunReport(null);
+    setTestRunRule(rule);
+    setIsTestRunning(false);
+    setTestRunDocs([]);
+    setTestRunImages([]);
+    setShowTestRun(true);
+  };
+
+  const handleTestRun = async () => {
+    if (!testRunRule) return;
+    const client = getClient();
+    if (!client) {
+      showToast('error', '请先连接 Gateway');
+      return;
+    }
+
+    client.setChatId(`agentloop-${Date.now()}`);
+
+    setIsTestRunning(true);
+    setTestRunMessages([]);
+    setTestRunReport(null);
+
+    const fullMessage = `${TEST_RUN_PROMPT} ${testRunRule.name}`;
+    client.send(fullMessage);
+
+    let handled = false;
+
+    const handleTestEvent = (event: NanobotOutboundEvent) => {
+      if (handled) return;
+
+      if (event.eventType === 'progress') {
+        const text = event.content;
+        const toolHint = event.metadata?._tool_hint;
+        const thinking = event.metadata?._thinking as string | undefined;
+
+        setTestRunMessages(prev => {
+          const msgs = [...prev];
+          if (thinking) {
+            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
+            if (thinkIdx >= 0) {
+              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
+            } else {
+              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
+            }
+          }
+          if (toolHint && typeof toolHint === 'string') {
+            const toolInfo = extractToolInfo(toolHint);
+            if (toolInfo) {
+              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+            }
+          }
+          if (text) {
+            const lastMsg = msgs[msgs.length - 1];
+            if (lastMsg && lastMsg.type === 'text') {
+              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
+            } else {
+              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
+            }
+          }
+          return msgs;
+        });
+        client.ack(event.eventId);
+      } else if (event.eventType === 'tool_hint') {
+        const toolContent = event.content;
+        if (toolContent) {
+          const toolInfo = extractToolInfo(toolContent);
+          if (toolInfo) {
+            setTestRunMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
+          }
+        }
+        client.ack(event.eventId);
+      } else if (event.eventType === 'final' && event.content) {
+        handled = true;
+        client.ack(event.eventId);
+        setTestRunReport(event.content);
+        const multimodal = event.multimodalResponse || event.multimodal_response;
+        if (multimodal) {
+          setTestRunDocs(extractDocuments(multimodal));
+          setTestRunImages(extractImages(multimodal));
+        }
+        setIsTestRunning(false);
+        showToast('success', `执行完成`, 3000);
+      } else if (event.eventType === 'error') {
+        handled = true;
+        setIsTestRunning(false);
+        setTestRunReport(null);
+        showToast('error', '测试运行时出错');
+      }
+    };
+
+    const unsubscribe = client.onEvent(handleTestEvent);
+    eventHandlerRef.current = unsubscribe;
+  };
+
   const handleDeleteRule = async (ruleId: string) => {
     const rule = rules.find(r => r.id === ruleId);
     const ok = await deleteRule(ruleId);
@@ -646,7 +757,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   if (selectedRule) {
     return (
       <>
-        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={() => { setShowEdit(true); setEditDescription(''); }} />
+        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={() => { setShowEdit(true); setEditDescription(''); }} onTestRun={() => openTestRunModal(selectedRule)} />
         {showEdit && (
           <EditRuleModal
             rule={selectedRule}
@@ -656,6 +767,18 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
             isEditing={isEditing}
             editMessages={editMessages}
             onEdit={handleEditRule}
+          />
+        )}
+        {showTestRun && testRunRule && (
+          <TestRunModal
+            rule={testRunRule}
+            onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); setTestRunMessages([]); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
+            onExecute={handleTestRun}
+            isRunning={isTestRunning}
+            messages={testRunMessages}
+            report={testRunReport}
+            docs={testRunDocs}
+            images={testRunImages}
           />
         )}
       </>
@@ -777,6 +900,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                   onDelete={() => handleDeleteRule(rule.id)}
                   onToggle={() => handleToggleStatus(rule)}
                   onActivate={() => handleActivateRule(rule)}
+                  onTestRun={() => openTestRunModal(rule)}
                 />
               ))}
             </div>
@@ -804,11 +928,24 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           messages={activateMessages}
         />
       )}
+
+      {showTestRun && testRunRule && (
+        <TestRunModal
+          rule={testRunRule}
+          onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); setTestRunMessages([]); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
+          onExecute={handleTestRun}
+          isRunning={isTestRunning}
+          messages={testRunMessages}
+          report={testRunReport}
+          docs={testRunDocs}
+          images={testRunImages}
+        />
+      )}
     </div>
   );
 }
 
-function AgentCard({ rule, onClick, onDelete, onToggle, onActivate }: { rule: Rule; onClick: () => void; onDelete: () => void; onToggle: () => void; onActivate: () => void }) {
+function AgentCard({ rule, onClick, onDelete, onToggle, onActivate, onTestRun }: { rule: Rule; onClick: () => void; onDelete: () => void; onToggle: () => void; onActivate: () => void; onTestRun: () => void }) {
   const statusColors = {
     active: 'bg-emerald-500',
     draft: 'bg-amber-500',
@@ -885,6 +1022,13 @@ function AgentCard({ rule, onClick, onDelete, onToggle, onActivate }: { rule: Ru
             {statusLabels[rule.status]}
           </span>
           <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onTestRun(); }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-colors"
+            >
+              <Play size={11} />
+              测试
+            </button>
             {rule.status !== 'active' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onActivate(); }}
@@ -1178,7 +1322,7 @@ function EditRuleModal({ rule, onClose, description, setDescription, isEditing, 
   );
 }
 
-function RuleDetail({ rule, onBack, onEdit }: { rule: Rule; onBack: () => void; onEdit: () => void }) {
+function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: () => void; onEdit: () => void; onTestRun: () => void }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
 
   return (
@@ -1211,7 +1355,7 @@ function RuleDetail({ rule, onBack, onEdit }: { rule: Rule; onBack: () => void; 
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
+              <button onClick={onTestRun} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
                 <Play size={14} />测试运行
               </button>
             </div>
@@ -1333,6 +1477,138 @@ function FlowGraphView({ flow }: { flow: FlowGraph }) {
         <div className="flex items-center gap-2"><Bot size={10} className="text-cyan-400" />技能</div>
         <div className="flex items-center gap-2"><GitFork size={10} className="text-amber-400" />条件</div>
         <div className="flex items-center gap-2"><Square size={8} className="text-zinc-400" />结束</div>
+      </div>
+    </div>
+  );
+}
+
+const markdownComponents = { pre: CodeBlock };
+
+function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, docs, images }: {
+  rule: Rule;
+  onClose: () => void;
+  onExecute: () => void;
+  isRunning: boolean;
+  messages: GenerationMessage[];
+  report: string | null;
+  docs: DocumentInfo[];
+  images: DocumentInfo[];
+}) {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  return (
+    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[85vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 px-6 py-4 border-b border-pc-border">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-pc-text">测试运行</h2>
+              <p className="text-xs text-pc-text-muted mt-0.5">{rule.name}</p>
+            </div>
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="mb-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${
+                rule.status === 'active' ? 'bg-emerald-400' :
+                rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
+              }`} />
+              <span className="text-sm text-pc-text font-medium">{rule.name}</span>
+            </div>
+            <p className="text-xs text-pc-text-muted">{rule.description}</p>
+          </div>
+
+          {messages.length > 0 && (
+            <div className="space-y-3 mb-4">
+              {messages.map((msg) => (
+                <div key={msg.id}>
+                  {msg.type === 'thinking' && (
+                    <ThinkingBlock text={msg.content} />
+                  )}
+                  {msg.type === 'tool_use' && (
+                    <ToolCall name={msg.name || 'tool'} input={msg.input} />
+                  )}
+                  {msg.type === 'text' && msg.content && (
+                    <div className="markdown-body">
+                      <LazyMarkdown components={markdownComponents}>{msg.content}</LazyMarkdown>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {isRunning && (
+                <div className="flex items-center gap-2 text-sm text-pc-text-muted">
+                  <Loader2 size={14} className="animate-spin text-pc-accent" />
+                  <span>执行中...</span>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+
+          {report && (
+            <div className="rounded-xl bg-[var(--pc-bg-base)] border border-[var(--pc-accent-dim)] overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--pc-accent-dim)] bg-[var(--pc-accent-glow)]">
+                <CheckCircle size={14} className="text-emerald-400" />
+                <span className="text-sm font-medium text-pc-text">执行报告</span>
+              </div>
+              <div className="p-4 overflow-y-auto max-h-[50vh]">
+                <article className="prose prose-sm max-w-none">
+                  <LazyMarkdown components={markdownComponents}>{report}</LazyMarkdown>
+                </article>
+              </div>
+            </div>
+          )}
+
+          {images.length > 0 && (
+            <div className="space-y-3 mt-4">
+              {images.map((img, i) => (
+                <ImageBlock key={`img-${i}`} src={`/api/v1/admin/assets/${img.assetId}/download`} alt={img.fileName} />
+              ))}
+            </div>
+          )}
+
+          {docs.length > 0 && (
+            <div className="space-y-3 mt-4">
+              {docs.map((doc, i) => (
+                <DocumentPreview key={`doc-${i}`} assetId={doc.assetId} fileName={doc.fileName} mimeType={doc.mimeType} />
+              ))}
+            </div>
+          )}
+
+          {!isRunning && !report && messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Play size={32} className="text-pc-accent mb-3" />
+              <p className="text-sm text-pc-text-secondary mb-1">准备测试运行</p>
+              <p className="text-xs text-pc-text-muted">点击下方「执行」按钮开始测试</p>
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end gap-3">
+          {!isRunning && !report && messages.length === 0 && (
+            <button
+              onClick={onExecute}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
+            >
+              <Play size={14} />
+              执行
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            disabled={isRunning}
+            className="px-5 py-2.5 rounded-xl text-sm font-medium text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            关闭
+          </button>
+        </div>
       </div>
     </div>
   );
