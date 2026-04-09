@@ -291,7 +291,7 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
       onDrop={handleDrop}
     >
       <div className="max-w-4xl mx-auto">
-        <div className={`relative rounded-3xl border bg-[var(--pc-bg-surface)]/40 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] transition-colors ${isDragOver ? 'border-[var(--pc-accent-dim)] bg-[var(--pc-accent-glow)]' : 'border-pc-border'}`}>
+        <div className={`relative rounded-3xl border bg-[var(--pc-bg-surface)]/40 p-3 shadow-[0_0_0_1px_var(--pc-shadow-inset)] transition-colors ${isDragOver ? 'border-[var(--pc-accent-dim)] bg-[var(--pc-accent-glow)]' : 'border-pc-border'}`}>
           <SlashCommandMenu
             query={text}
             visible={showSlash}

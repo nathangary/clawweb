@@ -505,7 +505,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
             ? (isLight
                 ? 'bg-[rgba(var(--pc-accent-rgb),0.12)] text-pc-text border border-[rgba(var(--pc-accent-rgb),0.3)]'
                 : 'bg-[rgba(var(--pc-accent-rgb),0.08)] text-pc-text border border-[rgba(var(--pc-accent-rgb),0.2)]')
-            : 'bg-pc-elevated/40 text-pc-text border border-pc-border shadow-[0_0_0_1px_rgba(255,255,255,0.03)]'
+            : 'bg-pc-elevated/40 text-pc-text border border-pc-border shadow-[0_0_0_1px_var(--pc-shadow-inset)]'
         }`}
         >
           {/* User-visible text */}

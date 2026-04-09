@@ -25,6 +25,7 @@ const themes: Record<ConcreteTheme, Record<string, string>> = {
     '--pc-hover': 'rgba(255,255,255,0.05)',
     '--pc-hover-strong': 'rgba(255,255,255,0.08)',
     '--pc-separator': 'rgba(255,255,255,0.05)',
+    '--pc-shadow-inset': 'rgba(255,255,255,0.03)',
   },
   light: {
     '--pc-bg-base': '#f4f4f5',
@@ -45,6 +46,7 @@ const themes: Record<ConcreteTheme, Record<string, string>> = {
     '--pc-hover': 'rgba(0,0,0,0.05)',
     '--pc-hover-strong': 'rgba(0,0,0,0.08)',
     '--pc-separator': 'rgba(0,0,0,0.08)',
+    '--pc-shadow-inset': 'rgba(0,0,0,0.05)',
   },
   oled: {
     '--pc-bg-base': '#000000',
@@ -65,6 +67,7 @@ const themes: Record<ConcreteTheme, Record<string, string>> = {
     '--pc-hover': 'rgba(255,255,255,0.04)',
     '--pc-hover-strong': 'rgba(255,255,255,0.06)',
     '--pc-separator': 'rgba(255,255,255,0.04)',
+    '--pc-shadow-inset': 'rgba(255,255,255,0.02)',
   },
 };
 
@@ -113,11 +116,12 @@ const accents: Record<AccentColor, Record<string, string>> = {
   },
 };
 
-function applyVars(vars: Record<string, string>) {
+function applyVars(vars: Record<string, string>, resolvedTheme: 'dark' | 'light' | 'oled') {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(vars)) {
     root.style.setProperty(k, v);
   }
+  root.setAttribute('data-theme', resolvedTheme);
 }
 
 /** Resolve 'system' to the actual theme based on OS preference. */
@@ -167,11 +171,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const applyAll = useCallback((s: ThemeSettings) => {
+    const resolved = resolveTheme(s.theme);
     applyVars({
-      ...themes[resolveTheme(s.theme)],
+      ...themes[resolved],
       ...accents[s.accent],
       ...fontVars(s.uiFont, s.monoFont, s.uiFontSize, s.monoFontSize),
-    });
+    }, resolved);
   }, []);
 
   const setTheme = useCallback((t: ThemeName) => {

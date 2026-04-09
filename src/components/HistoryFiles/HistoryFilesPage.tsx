@@ -439,7 +439,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
             <div className={`flex-1 min-w-0 min-h-0 relative ${getFileType(selectedFile) === 'html' ? 'h-full overflow-hidden bg-white' : 'overflow-y-auto'}`}>
               {getFileType(selectedFile) === 'markdown' ? (
                 <div className="h-full w-full p-4 overflow-y-auto bg-[var(--pc-bg-base)] text-[var(--pc-text-primary)]">
-                  <article className="prose prose-sm max-w-none [&_*]:text-[var(--pc-text-primary)]">
+                  <article className="prose prose-sm max-w-none">
                     <LazyMarkdown components={{
                       h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
                       h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,

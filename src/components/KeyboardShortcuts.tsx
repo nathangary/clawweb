@@ -10,7 +10,7 @@ interface Props {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[1.75rem] h-7 px-2 rounded-lg border border-pc-border-strong bg-pc-elevated/80 text-xs font-mono text-pc-text shadow-[0_1px_0_0_rgba(255,255,255,0.05)]">
+    <kbd className="inline-flex items-center justify-center min-w-[1.75rem] h-7 px-2 rounded-lg border border-pc-border-strong bg-pc-elevated/80 text-xs font-mono text-pc-text shadow-[0_1px_0_0_var(--pc-shadow-inset)]">
       {children}
     </kbd>
   );

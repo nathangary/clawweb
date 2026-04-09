@@ -142,7 +142,7 @@ export function DocumentBlock({ name, url, ext, size }: DocumentBlockProps) {
           ) : content ? (
             <div className={`max-h-96 overflow-y-auto ${isMd ? 'p-3' : ''}`}>
               {isMd ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
+                <div className="prose prose-sm max-w-none">
                   <LazyMarkdown>{content}</LazyMarkdown>
                 </div>
               ) : (

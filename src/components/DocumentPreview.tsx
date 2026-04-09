@@ -257,7 +257,7 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
           )}
           <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
             <div className="p-4">
-              <article className="prose prose-sm dark:prose-invert max-w-none">
+              <article className="prose prose-sm max-w-none">
                 <LazyMarkdown components={{
                   h1: ({ node, ...props }) => <h1 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
                   h2: ({ node, ...props }) => <h2 {...props} id={props.children?.toString().toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')} />,
