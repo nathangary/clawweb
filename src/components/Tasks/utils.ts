@@ -9,6 +9,7 @@ export interface TaskHealth {
   lastRunAgo: string | null;
   lastStatus: string | null;
   enabled: boolean;
+  runCount: number;
 }
 
 export type FilterType = 'all' | 'active' | 'paused' | 'failing';
@@ -39,6 +40,7 @@ export function getTaskHealth(job: CronJob): TaskHealth {
     lastRunAgo: lastRunMs !== null ? formatAgo(lastRunMs) : null,
     lastStatus: job.state.last_status ?? null,
     enabled: job.enabled,
+    runCount: job.state.run_count ?? 0,
   };
 }
 

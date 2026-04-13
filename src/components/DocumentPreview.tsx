@@ -403,3 +403,34 @@ export function extractHtmlDocuments(multimodalResponse: { media?: Array<{ type?
       mimeType: m.mime_type,
     }));
 }
+
+export function extractJsonDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): HtmlDocumentInfo[] {
+  if (!multimodalResponse?.media) return [];
+  
+  return multimodalResponse.media
+    .filter(m => m.type === 'document' && (m.mime_type === 'application/json' || m.mime_type === 'text/json') && m.asset_id)
+    .map(m => ({
+      assetId: m.asset_id!,
+      url: m.url,
+      fileName: m.url ? m.url.split('/').pop() || 'data.json' : 'data.json',
+      mimeType: m.mime_type,
+    }));
+}
+
+export async function fetchJsonAsset<T = unknown>(assetId: string): Promise<T | null> {
+  try {
+    const creds = getStoredCredentials();
+    const headers: Record<string, string> = {};
+    if (creds?.token) {
+      headers['Authorization'] = `Bearer ${creds.token}`;
+    }
+
+    const response = await fetch(`/api/v1/admin/assets/${assetId}/download`, { headers });
+    if (!response.ok) return null;
+
+    const text = await response.text();
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}

@@ -12,7 +12,7 @@ import { CodeBlock } from './CodeBlock';
 import { ToolCall } from './ToolCall';
 import { ImageBlock } from './ImageBlock';
 import { copyToClipboard } from '../lib/clipboard';
-import { Bot, User, Wrench, Copy, Check, CheckCheck, RefreshCw, Zap, Info, Webhook, Braces, Clock, AlertCircle, Bookmark, ChevronDown, Reply } from 'lucide-react';
+import { Bot, User, Wrench, Copy, Check, CheckCheck, RefreshCw, Zap, Info, Webhook, Braces, Clock, AlertCircle, Bookmark, ChevronDown, Reply, Download, FileText } from 'lucide-react';
 import { t, getLocale } from '../lib/i18n';
 import { useLocale } from '../hooks/useLocale';
 import { stripWebhookScaffolding, hasWebhookScaffolding, hasWebchatEnvelope, stripWebchatEnvelope } from '../lib/systemEvent';
@@ -84,6 +84,37 @@ function getImageBlocks(blocks: MessageBlock[]): MessageBlock[] {
 
 function getInternalBlocks(blocks: MessageBlock[]): MessageBlock[] {
   return blocks.filter(b => b.type === 'thinking' || b.type === 'tool_use' || b.type === 'tool_result');
+}
+
+function renderAttachmentBlocks(blocks: MessageBlock[]) {
+  const imageBlocks = blocks.filter(b => b.type === 'image');
+  const fileBlocks = blocks.filter(b => b.type === 'file');
+  if (imageBlocks.length === 0 && fileBlocks.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {imageBlocks.map((b, i) => {
+        const img = b as Extract<MessageBlock, { type: 'image' }>;
+        const src = img.data ? `data:${img.mediaType};base64,${img.data}` : (img.url || '');
+        return <ImageBlock key={`att-img-${i}`} src={src} alt="Attachment" />;
+      })}
+      {fileBlocks.map((b, i) => {
+        const f = b as Extract<MessageBlock, { type: 'file' }>;
+        const href = f.data ? `data:${f.mediaType};base64,${f.data}` : (f.url || '#');
+        return (
+          <a
+            key={`att-file-${i}`}
+            href={href}
+            download={f.fileName}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-pc-border bg-pc-elevated/50 hover:bg-pc-elevated/80 transition-colors text-sm text-pc-text no-underline"
+          >
+            <FileText size={16} className="text-orange-400 shrink-0" />
+            <span className="truncate max-w-[160px]">{f.fileName}</span>
+            <Download size={14} className="text-pc-text-muted shrink-0" />
+          </a>
+        );
+      })}
+    </div>
+  );
 }
 
 function MarkdownImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
@@ -528,6 +559,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
               </div>
             )
           )}
+          {isUser && renderAttachmentBlocks(message.blocks)}
 
           {message.multimodalResponse && extractImages(message.multimodalResponse).map((img, i) => (
             <ImageBlock key={`img-${i}`} src={`/api/v1/admin/assets/${img.assetId}/download`} alt={img.fileName} />

@@ -62,6 +62,7 @@ export class NanobotGatewayClient {
   private chatId: string;
   private processedEventIds = new Set<string>();
   private cleanupProcessedIdsTimer: ReturnType<typeof setInterval> | null = null;
+  private boundSession = false;
 
   constructor(wsUrl?: string, authToken?: string, clientId?: string, chatId?: string) {
     this.wsUrl = wsUrl || `ws://${window.location.hostname}:8787/ws`;
@@ -77,6 +78,7 @@ export class NanobotGatewayClient {
 
   setChatId(chatId: string) {
     this.chatId = chatId;
+    this.boundSession = false;
   }
 
   onStatus(fn: NanobotStatusHandler) {
@@ -92,7 +94,13 @@ export class NanobotGatewayClient {
   }
 
   connect() {
-    if (this.ws) return;
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+      this.ws.close();
+      this.ws = null;
+    }
     this.autoReconnect = true;
     this._onStatus('connecting');
     this.ws = new WebSocket(this.wsUrl);
@@ -101,7 +109,10 @@ export class NanobotGatewayClient {
       this.connected = true;
       this.reconnectAttempts = 0;
       this._onStatus('connected');
-      this.bindSession();
+      this.startProcessedIdsCleanup();
+      if (!this.boundSession) {
+        this.bindSession();
+      }
     };
 
     this.ws.onmessage = (ev) => {
@@ -113,14 +124,19 @@ export class NanobotGatewayClient {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      const wasConnected = this.connected;
       this.ws = null;
       this.connected = false;
+      if (wasConnected) {
+        console.warn(`[GW] WebSocket closed (code=${event.code}, reason=${event.reason || 'none'})`);
+      }
       this._onStatus('disconnected');
       if (this.autoReconnect) this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => { 
+    this.ws.onerror = () => {
+      this.connected = false;
       this._onStatus('disconnected');
     };
   }
@@ -128,12 +144,35 @@ export class NanobotGatewayClient {
   disconnect() {
     this.autoReconnect = false;
     this.reconnectAttempts = 0;
+    this.boundSession = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.cleanupProcessedIdsTimer) { clearInterval(this.cleanupProcessedIdsTimer); this.cleanupProcessedIdsTimer = null; }
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.connected = false;
     this.processedEventIds.clear();
     this._onStatus('disconnected');
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    const base = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    const jitter = Math.random() * base * 0.3;
+    const delay = base + jitter;
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  private startProcessedIdsCleanup() {
+    if (this.cleanupProcessedIdsTimer) return;
+    this.cleanupProcessedIdsTimer = setInterval(() => {
+      if (this.processedEventIds.size > 1000) {
+        const arr = Array.from(this.processedEventIds);
+        this.processedEventIds = new Set(arr.slice(arr.length - 500));
+      }
+    }, 60000);
   }
 
   private handleMessage(data: NanobotOutboundEvent) {
@@ -153,9 +192,10 @@ export class NanobotGatewayClient {
       session_key: sessionKey,
       chat_id: this.chatId,
     });
+    this.boundSession = true;
   }
 
-  send(message: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) {
+  send(message: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>, extraParams?: Record<string, unknown>) {
     const msg: Record<string, unknown> = {
       messageId: genId('msg'),
       channel: 'transport',
@@ -167,10 +207,21 @@ export class NanobotGatewayClient {
 
     if (attachments && attachments.length > 0) {
       msg.media = attachments.map(a => `data:${a.mimeType};base64,${a.content}`);
+      msg.attachments = attachments.map(a => ({
+        type: a.mimeType.startsWith('image/') ? 'image' : 'file',
+        url: '',
+        localPath: '',
+        mime_type: a.mimeType,
+        file_name: a.fileName,
+      }));
     }
 
     if (this.authToken) {
       msg.token = this.authToken;
+    }
+
+    if (extraParams) {
+      msg.metadata = extraParams;
     }
 
     this.sendRaw(msg);
@@ -203,11 +254,12 @@ export class NanobotGatewayClient {
     });
   }
 
-  private sendRaw(data: Record<string, unknown>) {
+  private sendRaw(data: Record<string, unknown>): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
+      return false;
     }
     this.ws.send(JSON.stringify(data));
+    return true;
   }
 
   ack(eventId: string) {
@@ -217,16 +269,11 @@ export class NanobotGatewayClient {
     });
   }
 
-  private scheduleReconnect() {
-    if (this.reconnectTimer) return;
-    const base = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    const jitter = Math.random() * base * 0.3;
-    const delay = base + jitter;
-    this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
+  stop(): boolean {
+    return this.sendRaw({
+      type: 'stop',
+      chat_id: this.chatId,
+    });
   }
 
   get isConnected() { return this.connected; }

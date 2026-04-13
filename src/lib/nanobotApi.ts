@@ -65,6 +65,7 @@ export interface CronJobState {
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_status?: string;
+  run_count?: number;
 }
 
 export interface CronJob {

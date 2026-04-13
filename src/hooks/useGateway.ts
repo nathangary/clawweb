@@ -1,387 +1,142 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useConnectionStore } from '../stores/connectionStore';
+import { useChatStore } from '../stores/chatStore';
 import { getStoredCredentials } from '../lib/credentials';
-import { genId } from '../lib/utils';
-import type { ChatMessage, MessageBlock, Session } from '../types';
-import type { NanobotOutboundEvent, NanobotMediaItem } from '../lib/nanobotGateway';
+import type { ChatMessage, MessageBlock } from '../types';
 
 export function useGateway() {
-  const status = useConnectionStore(s => s.status);
+  const effectiveStatus = useConnectionStore(s => s.effectiveStatus);
   const getClient = useConnectionStore(s => s.getClient);
   const getApiClient = useConnectionStore(s => s.getApiClient);
   const disconnect = useConnectionStore(s => s.disconnect);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState('transport:web');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const messages = useChatStore(s => s.messages);
+  const sessions = useChatStore(s => s.sessions);
+  const activeSession = useChatStore(s => s.activeSession);
+  const isGenerating = useChatStore(s => s.isGenerating);
+  const isLoadingHistory = useChatStore(s => s.isLoadingHistory);
+  const authenticated = useChatStore(s => s.authenticated);
+  const connectError = useChatStore(s => s.connectError);
+  const isConnecting = useChatStore(s => s.isConnecting);
+
   const isConnectingRef = useRef(false);
-  const messagesRef = useRef(messages);
-  const activeSessionRef = useRef(activeSession);
-  const currentEventIdRef = useRef<string | null>(null);
-  const currentStreamingIdRef = useRef<string | null>(null);
-
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
-
   const initRef = useRef(false);
+  const prevEffectiveStatusRef = useRef<string>(effectiveStatus);
+
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
     const stored = getStoredCredentials();
     if (stored?.url && (stored.url.startsWith('ws://') || stored.url.startsWith('wss://'))) {
-      login(stored.url, stored.token);
+      useChatStore.getState().setIsConnecting(true);
+      isConnectingRef.current = true;
+      useChatStore.getState().setConnectError(null);
+      useConnectionStore.getState().connect(stored.url, stored.token, undefined, (e) => {
+        const client = useConnectionStore.getState().getClient();
+        if (client) client.ack(e.eventId);
+        useChatStore.getState().handleEvent(e);
+      });
     } else {
-      setAuthenticated(false);
+      useChatStore.getState().setAuthenticated(false);
     }
   }, []);
 
-  const handleEvent = useCallback((event: NanobotOutboundEvent) => {
-    const eventSession = event.sessionKey;
-    const eventChatId = event.chatId;
-    const activeSess = activeSessionRef.current;
-    
-    if (activeSess.startsWith('transport:')) {
-      const activeChatId = activeSess.replace('transport:', '');
-      if (eventChatId !== activeChatId) {
-        if (eventChatId && eventChatId.startsWith('web-')) {
-          const newSession = `transport:${eventChatId}`;
-          setActiveSession(newSession);
-          activeSessionRef.current = newSession;
-        } else {
-          return;
-        }
-      }
-    } else if (eventSession && eventSession !== activeSess) {
-      return;
-    }
-
-    getClient()?.ack(event.eventId);
-
-    if (event.eventType === 'progress') {
-      const text = event.content;
-      const toolHint = event.metadata?._tool_hint;
-
-      const existingStreamingId = currentStreamingIdRef.current;
-      const existingStreaming = messagesRef.current.find(m => m.role === 'assistant' && m.isStreaming && m.id === existingStreamingId);
-      
-      if (existingStreaming && existingStreaming.runId === event.eventId) {
-        setMessages(prev => {
-          const idx = prev.findIndex(m => m.id === existingStreaming.id);
-          if (idx === -1) return prev;
-          const updated = { ...existingStreaming };
-          if (text) updated.content = text;
-          const blocks: MessageBlock[] = [];
-          if (toolHint) {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
-            }
-          }
-          if (text) blocks.push({ type: 'text', text });
-          updated.blocks = blocks;
-          const newMsgs = [...prev];
-          newMsgs[idx] = updated;
-          return newMsgs;
-        });
-        return;
-      }
-
-      if (currentEventIdRef.current === null) {
-        return;
-      }
-      
-      const blocks: MessageBlock[] = [];
-      if (toolHint) {
-        const toolInfo = extractToolInfo(toolHint);
-        if (toolInfo) {
-          blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
-        }
-      }
-      if (text) blocks.push({ type: 'text', text });
-      const msg: ChatMessage = {
-        id: event.eventId,
-        role: 'assistant',
-        content: text || '',
-        timestamp: Date.now(),
-        blocks,
-        isStreaming: true,
-        runId: event.eventId,
-        streamStartedAt: Date.now(),
-      };
-      currentStreamingIdRef.current = event.eventId;
-      setMessages(prev => [...prev, msg]);
-    } else if (event.eventType === 'tool_hint') {
-      const toolContent = event.content;
-      if (toolContent) {
-        const toolInfo = extractToolInfo(toolContent);
-        if (toolInfo) {
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.isStreaming) {
-              const updated = { ...last, blocks: [...last.blocks] };
-              const existingToolIndex = updated.blocks.findIndex(
-                b => b.type === 'tool_use' && b.id === event.eventId
-              );
-              if (existingToolIndex === -1) {
-                updated.blocks.push({ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId });
-              }
-              return [...prev.slice(0, -1), updated];
-            }
-            if (currentEventIdRef.current === null) return prev;
-            const msg: ChatMessage = {
-              id: event.eventId,
-              role: 'assistant',
-              content: '',
-              timestamp: Date.now(),
-              blocks: [{ type: 'tool_use', name: toolInfo.name, input: toolInfo.args, id: event.eventId }],
-              isStreaming: true,
-              runId: event.eventId,
-              streamStartedAt: Date.now(),
-            };
-            return [...prev, msg];
-          });
-        }
-      }
-    } else if (event.eventType === 'final') {
-      if (currentEventIdRef.current) {
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-        if (lastMsg?.role === 'assistant' && lastMsg.streamStartedAt) {
-          const genTime = Date.now() - lastMsg.streamStartedAt;
-          lastMsg.generationTimeMs = genTime;
-        }
-      }
-      currentEventIdRef.current = null;
-      currentStreamingIdRef.current = null;
-      setIsGenerating(false);
-
-      const processMedia = (media?: string[] | NanobotMediaItem[]): MessageBlock[] => {
-        if (!media || !Array.isArray(media)) return [];
-        const blocks: MessageBlock[] = [];
-        for (const item of media) {
-          if (typeof item === 'string') {
-            if (item.startsWith('data:')) {
-              const match = item.match(/^data:([^;]+);base64,(.+)$/);
-              if (match) {
-                blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
-              }
-            } else if (item.startsWith('http')) {
-              blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: item });
-            }
-          } else if (item.type === 'image' && item.asset_id) {
-            blocks.push({ type: 'image' as const, mediaType: item.mime_type || 'image/jpeg', url: `/api/v1/admin/assets/${item.asset_id}/download` });
-          } else if (item.type === 'image' && item.url) {
-            blocks.push({ type: 'image' as const, mediaType: item.mime_type || 'image/jpeg', url: item.url });
-          }
-        }
-        return blocks;
-      };
-
-      const newImageBlocks = processMedia(event.media);
-      const multimodalResponse = event.multimodalResponse || event.multimodal_response;
-
-      if (event.content || newImageBlocks.length > 0 || multimodalResponse) {
-        setMessages(prev => {
-          for (let i = prev.length - 1; i >= 0; i--) {
-            const m = prev[i];
-            if (m.role === 'assistant' && m.isStreaming) {
-              const finalBlocks: MessageBlock[] = event.content ? [{ type: 'text' as const, text: event.content }] : [];
-              const mergedBlocks = [...finalBlocks, ...newImageBlocks];
-              const updated: ChatMessage[] = [...prev];
-              updated[i] = {
-                ...m,
-                isStreaming: false,
-                content: event.content,
-                blocks: mergedBlocks,
-                multimodalResponse,
-              };
-              return updated;
-            }
-          }
-          const blocks: MessageBlock[] = [...newImageBlocks, { type: 'text' as const, text: event.content }];
-          return [...prev, {
-            id: event.eventId,
-            role: 'assistant' as const,
-            content: event.content,
-            timestamp: Date.now(),
-            blocks,
-            isStreaming: false,
-            multimodalResponse,
-          }];
-        });
-      } else {
-        setMessages(prev => {
-          for (let i = prev.length - 1; i >= 0; i--) {
-            const m = prev[i];
-            if (m.role === 'assistant' && m.isStreaming) {
-              const updated: ChatMessage[] = [...prev];
-              updated[i] = { ...m, isStreaming: false };
-              return updated;
-            }
-          }
-          return prev;
-        });
-      }
-    } else if (event.eventType === 'error') {
-      currentEventIdRef.current = null;
-      setIsGenerating(false);
-      setMessages(prev => {
-        for (let i = prev.length - 1; i >= 0; i--) {
-          const m = prev[i];
-          if (m.role === 'assistant' && m.isStreaming) {
-            const updated: ChatMessage[] = [...prev];
-            updated[i] = { ...m, isStreaming: false };
-            return updated;
-          }
-        }
-        return [...prev, {
-          id: 'error-' + Date.now(),
-          role: 'assistant' as const,
-          content: `Error: ${event.content || 'Unknown error'}`,
-          timestamp: Date.now(),
-          blocks: [{ type: 'text' as const, text: `Error: ${event.content || 'Unknown error'}` }],
-        }];
-      });
-    }
-  }, [getClient]);
-
-  function extractToolInfo(hint: unknown): { name: string; args: Record<string, unknown> } | null {
-    if (typeof hint !== 'string') return null;
-    const match = hint.match(/^(\w+)\("(.*)"\)$/);
-    if (match) {
-      return { name: match[1], args: { input: match[2] } };
-    }
-    return { name: 'tool', args: { input: String(hint) } };
-  }
-
-  const loadSessions = useCallback(async () => {
-    const api = getApiClient();
-    if (!api) return;
-    try {
-      const res = await api.getSessions();
-      if (res.applied && res.data.sessions) {
-        setSessions(res.data.sessions.map(s => ({
-          key: s.key,
-          label: s.display_key || s.key,
-          messageCount: s.message_count || s.messageCount,
-        })));
-      }
-    } catch {
-      setSessions([]);
-    }
-  }, [getApiClient]);
-
-  const loadHistory = useCallback(async (sessionKey: string) => {
-    const api = getApiClient();
-    if (!api) return;
-    setIsLoadingHistory(true);
-    try {
-      const res = await api.getSessionHistory(sessionKey, 1, 100, 'asc');
-      if (res.applied && res.data.messages) {
-        const baseUrl = api.getBaseUrl().replace('/api', '');
-        const msgs: ChatMessage[] = res.data.messages.map((m, i) => {
-          const blocks: MessageBlock[] = [];
-          if (m.media && Array.isArray(m.media)) {
-            for (const path of m.media) {
-              if (path.startsWith('data:')) {
-                const match = path.match(/^data:([^;]+);base64,(.+)$/);
-                if (match) {
-                  blocks.push({ type: 'image' as const, mediaType: match[1], data: match[2] });
-                }
-              } else if (path.startsWith('http')) {
-                blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url: path });
-              } else {
-                const match = path.match(/workspace[/\\](.+)$/);
-                const relativePath = match ? match[1] : path;
-                const url = `${baseUrl}/api/v1/files/${encodeURIComponent(relativePath)}`;
-                blocks.push({ type: 'image' as const, mediaType: 'image/jpeg', url });
-              }
-            }
-          }
-          blocks.push({ type: 'text' as const, text: m.content });
-          return {
-            id: `${sessionKey}-${i}`,
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-            timestamp: new Date(m.timestamp).getTime(),
-            blocks,
-            multimodalResponse: m.multimodal_response,
-          };
-        });
-        setMessages(msgs);
-      }
-    } catch {
-      setMessages([]);
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  }, [getApiClient]);
-
   useEffect(() => {
-    const unsub = useConnectionStore.subscribe((state, prevState) => {
-      if (state.status !== prevState.status) {
-        if (state.status === 'connected') {
-          setAuthenticated(true);
-          setConnectError(null);
-          setIsConnecting(false);
-          isConnectingRef.current = false;
-          loadSessions();
-          loadHistory(activeSessionRef.current);
-        } else if (state.status === 'disconnected' && isConnectingRef.current) {
-          setConnectError('Connection failed — check URL');
-          setIsConnecting(false);
-          isConnectingRef.current = false;
-          setAuthenticated(false);
-        }
+    const prev = prevEffectiveStatusRef.current;
+    if (effectiveStatus === prev) return;
+    prevEffectiveStatusRef.current = effectiveStatus;
+
+    if (effectiveStatus === 'connected') {
+      const chat = useChatStore.getState();
+      chat.setAuthenticated(true);
+      chat.setConnectError(null);
+      chat.setIsConnecting(false);
+      isConnectingRef.current = false;
+      chat.updateMessages(prev =>
+        prev.map(m =>
+          m.sendStatus === 'sending'
+            ? { ...m, sendStatus: 'sent' as const }
+            : m
+        )
+      );
+      const api = useConnectionStore.getState().getApiClient();
+      chat.loadSessions(api);
+      chat.loadHistory(chat.activeSession, api);
+    } else if (effectiveStatus === 'disconnected') {
+      const chat = useChatStore.getState();
+      if (isConnectingRef.current) {
+        chat.setConnectError('Connection failed — check URL');
+        chat.setIsConnecting(false);
+        isConnectingRef.current = false;
+        chat.setAuthenticated(false);
+      } else {
+        chat.updateMessages(prev =>
+          prev.map(m =>
+            m.sendStatus === 'sending'
+              ? { ...m, sendStatus: 'error' as const }
+              : m
+          )
+        );
+        chat.setIsGenerating(false);
       }
-    });
-    return unsub;
-  }, [loadHistory, loadSessions]);
+    }
+  }, [effectiveStatus]);
 
   const sendMessage = useCallback(async (text: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => {
     const msgId = 'user-' + Date.now();
-    const imageBlocks: MessageBlock[] = (attachments ?? [])
-      .filter(a => a.mimeType.startsWith('image/'))
-      .map(a => ({ type: 'image' as const, mediaType: a.mimeType, data: a.content }));
+    const blocks: MessageBlock[] = [];
+    for (const a of attachments ?? []) {
+      if (a.mimeType.startsWith('image/')) {
+        blocks.push({ type: 'image', mediaType: a.mimeType, data: a.content });
+      } else {
+        blocks.push({ type: 'file', fileName: a.fileName, mediaType: a.mimeType, data: a.content });
+      }
+    }
+    blocks.push({ type: 'text', text });
     const userMsg: ChatMessage = {
       id: msgId,
       role: 'user',
       content: text,
       timestamp: Date.now(),
-      blocks: [...imageBlocks, { type: 'text', text }],
+      blocks,
       sendStatus: 'sending',
     };
-    setMessages(prev => [...prev, userMsg]);
-    setIsGenerating(true);
+
+    useChatStore.getState().updateMessages(prev => [...prev, userMsg]);
+    useChatStore.getState().setIsGenerating(true);
 
     try {
       getClient()?.send(text, attachments);
-      currentEventIdRef.current = genId('event');
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'sent' as const } : m));
+      useChatStore.getState().updateMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'sent' as const } : m));
     } catch {
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'error' as const } : m));
-      setIsGenerating(false);
+      useChatStore.getState().updateMessages(prev => prev.map(m => m.id === msgId ? { ...m, sendStatus: 'error' as const } : m));
+      useChatStore.getState().setIsGenerating(false);
     }
   }, [getClient]);
 
   const abort = useCallback(async () => {
-    setIsGenerating(false);
-  }, []);
+    const client = getClient();
+    if (client) {
+      const sent = client.stop();
+      if (!sent) {
+        console.warn('[Gateway] stop() failed — WebSocket not connected');
+      }
+    }
+    useChatStore.getState().setIsGenerating(false);
+  }, [getClient]);
 
   const switchSession = useCallback((key: string) => {
-    setActiveSession(key);
-    activeSessionRef.current = key;
-    setMessages([]);
-    loadHistory(key);
-    if (key.startsWith('transport:')) {
+    const chat = useChatStore.getState();
+    const client = getClient();
+    const api = getApiClient();
+    chat.setActiveSession(key);
+    chat.setMessages([]);
+    chat.loadHistory(key, api);
+    if (key.startsWith('transport:') && client) {
       const chatId = key.replace('transport:', '');
-      getClient()?.setChatId(chatId);
+      client.setChatId(chatId);
     }
-  }, [loadHistory, getClient]);
+  }, [getClient, getApiClient]);
 
   const createNewSession = useCallback(async () => {
     const newChatId = `web-${Date.now()}`;
@@ -390,25 +145,20 @@ export function useGateway() {
   }, [switchSession]);
 
   const login = useCallback((url: string, token?: string) => {
-    setIsConnecting(true);
+    useChatStore.getState().setIsConnecting(true);
     isConnectingRef.current = true;
-    setConnectError(null);
-    useConnectionStore.getState().connect(url, token, undefined, handleEvent);
-  }, [handleEvent]);
+    useChatStore.getState().setConnectError(null);
+    useConnectionStore.getState().connect(url, token, undefined, (e) => {
+      const client = useConnectionStore.getState().getClient();
+      if (client) client.ack(e.eventId);
+      useChatStore.getState().handleEvent(e);
+    });
+  }, []);
 
   const logout = useCallback(() => {
     disconnect();
-    setAuthenticated(false);
-    setMessages([]);
-    setSessions([]);
-    setConnectError(null);
+    useChatStore.getState().reset();
   }, [disconnect]);
-
-  useEffect(() => {
-    if (status !== 'connected') return;
-    const interval = setInterval(loadSessions, 30000);
-    return () => clearInterval(interval);
-  }, [status, loadSessions]);
 
   const enrichedSessions = sessions.map(s => ({
     ...s,
@@ -418,8 +168,8 @@ export function useGateway() {
   }));
 
   return {
-    status, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
-    sendMessage, abort, switchSession, createNewSession, loadSessions,
+    status: effectiveStatus, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
+    sendMessage, abort, switchSession, createNewSession,
     authenticated, login, logout, connectError, isConnecting,
     getClient, getApiClient,
   };

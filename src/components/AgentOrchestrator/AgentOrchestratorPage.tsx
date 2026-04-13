@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Plus, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, Bot, Zap, GitFork, Circle, Square, Loader2, Search, Activity, CheckCircle, Power, PowerOff } from 'lucide-react';
+import { X, Plus, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, Bot, Zap, GitFork, Loader2, Search, Activity, CheckCircle, Power, PowerOff } from 'lucide-react';
 import type { NanobotGatewayClient, NanobotOutboundEvent } from '../../lib/nanobotGateway';
 import type { NanobotApiClient } from '../../lib/nanobotApi';
 import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
@@ -9,8 +9,9 @@ import { LazyMarkdown } from '../LazyMarkdown';
 import { CodeBlock } from '../CodeBlock';
 import { ThinkingBlock } from '../ThinkingBlock';
 import { ToolCall } from '../ToolCall';
-import { DocumentPreview, extractDocuments, extractImages, type DocumentInfo } from '../DocumentPreview';
+import { DocumentPreview, extractDocuments, extractImages, extractJsonDocuments, fetchJsonAsset, type DocumentInfo } from '../DocumentPreview';
 import { ImageBlock } from '../ImageBlock';
+import { FlowGraphView } from './FlowGraphView';
 
 interface GenerationMessage {
   id: string;
@@ -47,10 +48,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [activatingRule, setActivatingRule] = useState<Rule | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const [activateMessages, setActivateMessages] = useState<GenerationMessage[]>([]);
-  const [showEdit, setShowEdit] = useState(false);
-  const [editDescription, setEditDescription] = useState('');
-  const [isEditing, setIsEditing] = useState(false);
-  const [editMessages, setEditMessages] = useState<GenerationMessage[]>([]);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
@@ -150,8 +147,8 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     return null;
   };
 
-  const handleGenerateRule = async () => {
-    if (!description.trim()) return;
+  const handleGenerateRule = async (attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => {
+    if (!description.trim() && (!attachments || attachments.length === 0)) return;
     const client = getClient();
     if (!client) {
       showToast('error', '请先连接 Gateway');
@@ -162,8 +159,15 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
 
     setIsGenerating(true);
     setGenMessages([]);
-    const fullMessage = `${RULE_SYSTEM_PROMPT}\n\n需求如下：${description}`;
-    client.send(fullMessage);
+    const fullMessage = `${RULE_SYSTEM_PROMPT}\n\n需求如下：${description || '(见图片)'}`;
+    client.send(fullMessage, attachments, {
+      session_params: {
+        context_policy: {
+          enabled: true,
+          policy_id: "agent_builder_rule_path_policy"
+        }
+      }
+    });
 
     let handled = false;
 
@@ -174,9 +178,10 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         const text = event.content;
         const toolHint = event.metadata?._tool_hint;
         const thinking = event.metadata?._thinking as string | undefined;
-        
+
         setGenMessages(prev => {
           const msgs = [...prev];
+
           if (thinking) {
             const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
             if (thinkIdx >= 0) {
@@ -188,13 +193,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           if (toolHint && typeof toolHint === 'string') {
             const toolInfo = extractToolInfo(toolHint);
             if (toolInfo) {
-              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              const existingToolIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingToolIdx < 0) {
+                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              }
             }
           }
           if (text) {
-            const lastMsg = msgs[msgs.length - 1];
-            if (lastMsg && lastMsg.type === 'text') {
-              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
+            const textTarget = msgs[msgs.length - 1];
+            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
+              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
             } else {
               msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
             }
@@ -207,7 +215,13 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         if (toolContent) {
           const toolInfo = extractToolInfo(toolContent);
           if (toolInfo) {
-            setGenMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
+            setGenMessages(prev => {
+              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
+              }
+              return prev;
+            });
           }
         }
         client.ack(event.eventId);
@@ -226,7 +240,51 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                 jsonStr = braceMatch[0];
               }
             }
-            const parsed = JSON.parse(jsonStr);
+            let parsed: any;
+            try {
+              parsed = JSON.parse(jsonStr);
+            } catch {
+              const multimodal = event.multimodalResponse || event.multimodal_response;
+              if (multimodal?.content) {
+                jsonStr = multimodal.content.trim();
+                const mmCodeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+                if (mmCodeBlockMatch) {
+                  jsonStr = mmCodeBlockMatch[1].trim();
+                } else {
+                  const mmBraceMatch = jsonStr.match(/\{[\s\S]*\}/);
+                  if (mmBraceMatch) {
+                    jsonStr = mmBraceMatch[0];
+                  }
+                }
+                try {
+                  parsed = JSON.parse(jsonStr);
+                } catch {
+                  const jsonDocs = extractJsonDocuments(multimodal);
+                  if (jsonDocs.length > 0) {
+                    const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+                    if (jsonData) {
+                      parsed = jsonData as any;
+                    } else {
+                      throw new Error('Failed to fetch JSON asset');
+                    }
+                  } else {
+                    throw new Error('No valid JSON found in content or multimodalResponse');
+                  }
+                }
+              } else {
+                const jsonDocs = extractJsonDocuments(multimodal || {});
+                if (jsonDocs.length > 0) {
+                  const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+                  if (jsonData) {
+                    parsed = jsonData as any;
+                  } else {
+                    throw new Error('Failed to fetch JSON asset');
+                  }
+                } else {
+                  throw new Error('No valid JSON found in content or multimodalResponse');
+                }
+              }
+            }
             const ruleData = parsed.rule || parsed;
             
             const rawNodes = ruleData.flow?.nodes || [];
@@ -331,6 +389,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     };
 
     const unsubscribe = client.onEvent(handleRuleEvent);
+    eventHandlerRef.current?.();
     eventHandlerRef.current = unsubscribe;
   };
 
@@ -372,13 +431,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           if (toolHint && typeof toolHint === 'string') {
             const toolInfo = extractToolInfo(toolHint);
             if (toolInfo) {
-              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              const existingIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              }
             }
           }
           if (text) {
-            const lastMsg = msgs[msgs.length - 1];
-            if (lastMsg && lastMsg.type === 'text') {
-              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
+            const textTarget = msgs[msgs.length - 1];
+            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
+              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
             } else {
               msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
             }
@@ -391,13 +453,21 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         if (toolContent) {
           const toolInfo = extractToolInfo(toolContent);
           if (toolInfo) {
-            setActivateMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
+            setActivateMessages(prev => {
+              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
+              }
+              return prev;
+            });
           }
         }
         client.ack(event.eventId);
       } else if (event.eventType === 'final' && event.content) {
         handled = true;
         client.ack(event.eventId);
+        eventHandlerRef.current?.();
+        eventHandlerRef.current = null;
         (async () => {
           try {
             const newStatus = rule.status === 'disabled' ? 'active' : 'active';
@@ -430,6 +500,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     };
 
     const unsubscribe = client.onEvent(handleActivateEvent);
+    eventHandlerRef.current?.();
     eventHandlerRef.current = unsubscribe;
   };
 
@@ -483,13 +554,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           if (toolHint && typeof toolHint === 'string') {
             const toolInfo = extractToolInfo(toolHint);
             if (toolInfo) {
-              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              const existingIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              }
             }
           }
           if (text) {
-            const lastMsg = msgs[msgs.length - 1];
-            if (lastMsg && lastMsg.type === 'text') {
-              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
+            const textTarget = msgs[msgs.length - 1];
+            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
+              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
             } else {
               msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
             }
@@ -502,14 +576,31 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         if (toolContent) {
           const toolInfo = extractToolInfo(toolContent);
           if (toolInfo) {
-            setTestRunMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
+            setTestRunMessages(prev => {
+              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
+              }
+              return prev;
+            });
           }
         }
         client.ack(event.eventId);
-      } else if (event.eventType === 'final' && event.content) {
+      } else if (event.eventType === 'final') {
         handled = true;
         client.ack(event.eventId);
-        setTestRunReport(event.content);
+        eventHandlerRef.current?.();
+        eventHandlerRef.current = null;
+
+        let reportContent = event.content || '';
+        if (!reportContent) {
+          const multimodal = event.multimodalResponse || event.multimodal_response;
+          if (multimodal?.content) {
+            reportContent = multimodal.content;
+          }
+        }
+
+        setTestRunReport(reportContent);
         const multimodal = event.multimodalResponse || event.multimodal_response;
         if (multimodal) {
           setTestRunDocs(extractDocuments(multimodal));
@@ -526,6 +617,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     };
 
     const unsubscribe = client.onEvent(handleTestEvent);
+    eventHandlerRef.current?.();
     eventHandlerRef.current = unsubscribe;
   };
 
@@ -555,8 +647,8 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     }
   };
 
-  const handleEditRule = async () => {
-    if (!editDescription.trim() || !selectedRule) return;
+  const handleEditRule = async (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => {
+    if ((!description.trim() && (!attachments || attachments.length === 0)) || !selectedRule) return;
     const client = getClient();
     if (!client) {
       showToast('error', '请先连接 Gateway');
@@ -564,8 +656,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     }
 
     client.setChatId(`agentloop-${Date.now()}`);
-    setIsEditing(true);
-    setEditMessages([]);
 
     const ruleContext = JSON.stringify({
       name: selectedRule.name,
@@ -577,8 +667,8 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       systemPrompt: selectedRule.systemPrompt,
     }, null, 2);
 
-    const fullMessage = `请帮我修改以下智能体规则。当前规则如下：\n\n\`\`\`json\n${ruleContext}\n\`\`\`\n\n我的修改需求如下：${editDescription}\n\n请返回修改后的完整规则 JSON，格式与上面相同。`;
-    client.send(fullMessage);
+    const fullMessage = `请帮我修改以下智能体规则。当前规则如下：\n\n\`\`\`json\n${ruleContext}\n\`\`\`\n\n我的修改需求如下：${description || '(见图片)' }\n\n请返回修改后的完整规则 JSON，格式与上面相同。`;
+    client.send(fullMessage, attachments);
 
     let handled = false;
 
@@ -586,49 +676,14 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       if (handled) return;
       
       if (event.eventType === 'progress') {
-        const text = event.content;
-        const toolHint = event.metadata?._tool_hint;
-        const thinking = event.metadata?._thinking as string | undefined;
-        
-        setEditMessages(prev => {
-          const msgs = [...prev];
-          if (thinking) {
-            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
-            if (thinkIdx >= 0) {
-              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
-            } else {
-              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
-            }
-          }
-          if (toolHint && typeof toolHint === 'string') {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
-            }
-          }
-          if (text) {
-            const lastMsg = msgs[msgs.length - 1];
-            if (lastMsg && lastMsg.type === 'text') {
-              msgs[msgs.length - 1] = { ...lastMsg, content: lastMsg.content + text };
-            } else {
-              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
-            }
-          }
-          return msgs;
-        });
         client.ack(event.eventId);
       } else if (event.eventType === 'tool_hint') {
-        const toolContent = event.content;
-        if (toolContent) {
-          const toolInfo = extractToolInfo(toolContent);
-          if (toolInfo) {
-            setEditMessages(prev => [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }]);
-          }
-        }
         client.ack(event.eventId);
       } else if (event.eventType === 'final' && event.content) {
         handled = true;
         client.ack(event.eventId);
+        eventHandlerRef.current?.();
+        eventHandlerRef.current = null;
         (async () => {
           try {
             let jsonStr = event.content.trim();
@@ -641,7 +696,51 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                 jsonStr = braceMatch[0];
               }
             }
-            const parsed = JSON.parse(jsonStr);
+            let parsed: any;
+            try {
+              parsed = JSON.parse(jsonStr);
+            } catch {
+              const multimodal = event.multimodalResponse || event.multimodal_response;
+              if (multimodal?.content) {
+                jsonStr = multimodal.content.trim();
+                const mmCodeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+                if (mmCodeBlockMatch) {
+                  jsonStr = mmCodeBlockMatch[1].trim();
+                } else {
+                  const mmBraceMatch = jsonStr.match(/\{[\s\S]*\}/);
+                  if (mmBraceMatch) {
+                    jsonStr = mmBraceMatch[0];
+                  }
+                }
+                try {
+                  parsed = JSON.parse(jsonStr);
+                } catch {
+                  const jsonDocs = extractJsonDocuments(multimodal);
+                  if (jsonDocs.length > 0) {
+                    const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+                    if (jsonData) {
+                      parsed = jsonData as any;
+                    } else {
+                      throw new Error('Failed to fetch JSON asset');
+                    }
+                  } else {
+                    throw new Error('No valid JSON found in content or multimodalResponse');
+                  }
+                }
+              } else {
+                const jsonDocs = extractJsonDocuments(multimodal || {});
+                if (jsonDocs.length > 0) {
+                  const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+                  if (jsonData) {
+                    parsed = jsonData as any;
+                  } else {
+                    throw new Error('Failed to fetch JSON asset');
+                  }
+                } else {
+                  throw new Error('No valid JSON found in content or multimodalResponse');
+                }
+              }
+            }
             const ruleData = parsed.rule || parsed;
             
             const rawNodes = ruleData.flow?.nodes || [];
@@ -719,7 +818,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
               await fetchRules();
               await fetchMonitorStats();
               setSelectedRule(saved);
-              setShowEdit(false);
               showToast('success', `智能体「${saved.name}」已更新`, 4000);
             } else {
               showToast('error', '智能体保存失败，请重试');
@@ -727,21 +825,16 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           } catch (e) {
             console.error('解析修改后的规则失败:', e);
             showToast('error', '规则修改失败，请重试');
-          } finally {
-            setIsEditing(false);
-            setEditMessages([]);
-            setEditDescription('');
           }
         })();
       } else if (event.eventType === 'error') {
         handled = true;
-        setIsEditing(false);
-        setEditMessages([]);
         showToast('error', '修改规则时出错');
       }
     };
 
     const unsubscribe = client.onEvent(handleEditEvent);
+    eventHandlerRef.current?.();
     eventHandlerRef.current = unsubscribe;
   };
 
@@ -757,18 +850,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   if (selectedRule) {
     return (
       <>
-        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={() => { setShowEdit(true); setEditDescription(''); }} onTestRun={() => openTestRunModal(selectedRule)} />
-        {showEdit && (
-          <EditRuleModal
-            rule={selectedRule}
-            onClose={() => { setShowEdit(false); setEditDescription(''); setIsEditing(false); setEditMessages([]); }}
-            description={editDescription}
-            setDescription={setEditDescription}
-            isEditing={isEditing}
-            editMessages={editMessages}
-            onEdit={handleEditRule}
-          />
-        )}
+        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={handleEditRule} onTestRun={() => openTestRunModal(selectedRule)} />
         {showTestRun && testRunRule && (
           <TestRunModal
             rule={testRunRule}
@@ -1059,14 +1141,106 @@ function AgentCard({ rule, onClick, onDelete, onToggle, onActivate, onTestRun }:
   );
 }
 
+const AGENT_MAX_BASE64_CHARS = 300 * 1024;
+const AGENT_MAX_IMAGE_PIXELS = 1280;
+
+function compressAgentImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > AGENT_MAX_IMAGE_PIXELS || height > AGENT_MAX_IMAGE_PIXELS) {
+        const ratio = Math.min(AGENT_MAX_IMAGE_PIXELS / width, AGENT_MAX_IMAGE_PIXELS / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, width, height);
+      for (let q = 0.85; q >= 0.2; q -= 0.05) {
+        const dataUrl = canvas.toDataURL('image/jpeg', q);
+        const b64 = dataUrl.split(',')[1] || '';
+        if (b64.length <= AGENT_MAX_BASE64_CHARS) {
+          return resolve({ base64: b64, mimeType: 'image/jpeg' });
+        }
+      }
+      const scale = 0.5;
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+      resolve({ base64: dataUrl.split(',')[1] || '', mimeType: 'image/jpeg' });
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 function CreateModal({ onClose, description, setDescription, isGenerating, genMessages, onGenerate }: {
   onClose: () => void;
   description: string;
   setDescription: (v: string) => void;
   isGenerating: boolean;
   genMessages: GenerationMessage[];
-  onGenerate: () => void;
+  onGenerate: (attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void;
 }) {
+  const [attachments, setAttachments] = useState<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>([]);
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+
+        try {
+          const compressed = await compressAgentImage(file);
+          const preview = `data:${compressed.mimeType};base64,${compressed.base64}`;
+          setAttachments(prev => [...prev, {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            mimeType: compressed.mimeType,
+            fileName: file.name || 'pasted-image.png',
+            content: compressed.base64,
+            preview,
+          }]);
+        } catch {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1];
+            if (base64.length > AGENT_MAX_BASE64_CHARS) return;
+            setAttachments(prev => [...prev, {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              mimeType: file.type,
+              fileName: file.name || 'pasted-image.png',
+              content: base64,
+              preview: dataUrl,
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  };
+
+  const handleGenerate = () => {
+    const attachmentsData = attachments.length > 0
+      ? attachments.map(a => ({ mimeType: a.mimeType, fileName: a.fileName, content: a.content }))
+      : undefined;
+    onGenerate(attachmentsData);
+  };
+
   return (
     <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div className="w-full max-w-2xl max-h-[80vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1085,9 +1259,25 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            onPaste={handlePaste}
             placeholder="例如：当有新订单时，自动检查库存，如果库存不足则发送提醒通知采购部门..."
             className="w-full h-32 p-4 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-sm"
           />
+          {attachments.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {attachments.map(att => (
+                <div key={att.id} className="relative group">
+                  <img src={att.preview} alt="attachment" className="h-16 w-16 object-cover rounded-lg border border-pc-border" />
+                  <button
+                    onClick={() => removeAttachment(att.id)}
+                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {isGenerating && genMessages.length > 0 && (
             <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-48 overflow-y-auto">
               <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
@@ -1129,8 +1319,8 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
         </div>
         <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end">
           <button
-            onClick={onGenerate}
-            disabled={!description.trim() || isGenerating}
+            onClick={handleGenerate}
+            disabled={(!description.trim() && attachments.length === 0) || isGenerating}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
           >
             {isGenerating ? (
@@ -1219,111 +1409,23 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
   );
 }
 
-function EditRuleModal({ rule, onClose, description, setDescription, isEditing, editMessages, onEdit }: {
-  rule: Rule;
-  onClose: () => void;
-  description: string;
-  setDescription: (v: string) => void;
-  isEditing: boolean;
-  editMessages: GenerationMessage[];
-  onEdit: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[80vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="shrink-0 px-6 py-4 border-b border-pc-border">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-pc-text">编辑智能体</h2>
-              <p className="text-xs text-pc-text-muted mt-0.5">{rule.name} — 用自然语言描述修改需求</p>
-            </div>
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="mb-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
-            <div className="flex items-center gap-3 mb-2">
-              <div className={`w-2.5 h-2.5 rounded-full ${
-                rule.status === 'active' ? 'bg-emerald-400' :
-                rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
-              }`} />
-              <span className="text-sm text-pc-text font-medium">{rule.name}</span>
-            </div>
-            <p className="text-xs text-pc-text-muted">{rule.description}</p>
-            <div className="mt-3 flex items-center gap-3 text-[10px] text-pc-text-muted">
-              <span>{rule.skills?.length || 0} 个技能</span>
-              <span>·</span>
-              <span>{rule.flow?.nodes?.length || 0} 个节点</span>
-            </div>
-          </div>
-
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="例如：在库存检查后增加一个发送邮件通知的步骤..."
-            className="w-full h-32 p-4 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-sm"
-          />
-          {isEditing && editMessages.length > 0 && (
-            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-48 overflow-y-auto">
-              <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
-                <Loader2 size={14} className="animate-spin text-pc-accent" />
-                <span>修改中...</span>
-              </div>
-              <div className="space-y-1.5">
-                {editMessages.map((msg) => (
-                  <div key={msg.id} className="text-xs">
-                    {msg.type === 'thinking' && (
-                      <div className="flex items-start gap-2 text-pc-text-muted">
-                        <span>💭</span><span>{msg.content.slice(0, 150)}...</span>
-                      </div>
-                    )}
-                    {msg.type === 'tool_use' && (
-                      <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
-                        <Zap size={11} className="text-pc-accent" />
-                        <span className="text-pc-text">调用: {msg.name}</span>
-                      </div>
-                    )}
-                    {msg.type === 'text' && (
-                      <div className="text-pc-text-muted">{msg.content.slice(0, 80)}...</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="mt-4 p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
-            <h3 className="text-xs font-medium text-pc-text mb-2">示例</h3>
-            <div className="flex flex-wrap gap-2">
-              {['在流程末尾增加一个发送邮件通知的步骤', '将触发方式改为每天早上9点定时执行', '在库存检查后增加一个条件判断，如果库存充足则跳过通知'].map((example, idx) => (
-                <button key={idx} onClick={() => setDescription(example)} className="text-left px-3 py-1.5 rounded-lg text-xs text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
-                  {example}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end">
-          <button
-            onClick={onEdit}
-            disabled={!description.trim() || isEditing}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
-          >
-            {isEditing ? (
-              <><div className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin" /><span>修改中...</span></>
-            ) : (
-              <><span>✨</span><span>确认修改</span></>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: () => void; onEdit: () => void; onTestRun: () => void }) {
+function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: () => void; onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void; onTestRun: () => void }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
+  const [editPanelVisible, setEditPanelVisible] = useState(false);
+  const [editDescription, setEditDescription] = useState('');
+  const [attachments, setAttachments] = useState<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>([]);
+
+  const openEditPanel = () => {
+    setEditDescription('');
+    setAttachments([]);
+    setEditPanelVisible(true);
+  };
+
+  const closeEditPanel = () => {
+    setEditPanelVisible(false);
+    setEditDescription('');
+    setAttachments([]);
+  };
 
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--pc-bg-base)] flex flex-col overflow-hidden">
@@ -1339,7 +1441,7 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: (
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onEdit} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
+            <button onClick={openEditPanel} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors">
               <Edit3 size={14} />编辑规则
             </button>
           </div>
@@ -1362,122 +1464,27 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: (
           </div>
         </div>
       </header>
-      <main className="flex-1 overflow-y-auto p-6">
-        {viewMode === 'graph' ? (
-          <FlowGraphView flow={rule.flow} />
-        ) : (
-          <FlowListView flow={rule.flow} />
-        )}
-      </main>
-    </div>
-  );
-}
-
-function FlowGraphView({ flow }: { flow: FlowGraph }) {
-  const validEdges = flow.edges.filter(e => e.source && e.target);
-  const conditionEdges = validEdges.filter(e => e.label);
-
-  const nodeConfig: Record<string, { icon: typeof Bot; gradient: string; border: string; glow: string; accent: string }> = {
-    start: { icon: Circle, gradient: 'from-emerald-500/20 to-emerald-500/5', border: 'border-emerald-500/40', glow: 'shadow-emerald-500/10', accent: 'text-emerald-400' },
-    end: { icon: Square, gradient: 'from-zinc-500/20 to-zinc-500/5', border: 'border-zinc-500/40', glow: 'shadow-zinc-500/10', accent: 'text-zinc-400' },
-    condition: { icon: GitFork, gradient: 'from-amber-500/20 to-amber-500/5', border: 'border-amber-500/40', glow: 'shadow-amber-500/10', accent: 'text-amber-400' },
-    skill: { icon: Bot, gradient: 'from-cyan-500/20 to-violet-500/10', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/10', accent: 'text-cyan-400' },
-  };
-
-  return (
-    <div className="max-w-2xl mx-auto">
-      <div className="relative">
-        {flow.nodes.map((node, idx) => {
-          const cfg = nodeConfig[node.type] || nodeConfig.skill;
-          const Icon = cfg.icon;
-          const isLast = idx === flow.nodes.length - 1;
-          const outgoingEdges = validEdges.filter(e => e.source === node.id);
-
-          return (
-            <div key={node.id} className="relative">
-              <div className={`relative group rounded-2xl border bg-gradient-to-br ${cfg.gradient} ${cfg.border} shadow-lg ${cfg.glow} backdrop-blur-sm transition-all duration-300 dark:bg-[var(--pc-bg-surface)]`}>
-                <div className="flex items-center gap-4 p-4">
-                  <div className={`relative w-12 h-12 rounded-xl bg-gradient-to-br ${cfg.gradient} ${cfg.border} border flex items-center justify-center shrink-0`}>
-                    <Icon size={20} className={cfg.accent} />
-                    {node.type === 'start' && <div className="absolute inset-0 rounded-xl bg-emerald-400/20 animate-pulse" />}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${cfg.accent} bg-[var(--pc-hover)]`}>
-                        {node.type === 'start' ? '触发' : node.type === 'end' ? '结束' : node.type === 'condition' ? '条件' : '技能'}
-                      </span>
-                      {node.skillName && (
-                        <>
-                          <span className="text-xs text-pc-text-muted">·</span>
-                          <span className="text-xs text-[var(--pc-accent)] font-medium">{node.skillName}</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-sm text-pc-text font-medium">{node.label}</div>
-                  </div>
-
-                  {node.type !== 'start' && node.type !== 'end' && (
-                    <div className="w-8 h-8 rounded-full bg-[var(--pc-hover)] border border-pc-border flex items-center justify-center text-xs text-pc-text-muted font-mono shrink-0">
-                      {idx}
-                    </div>
-                  )}
-                </div>
-
-                {outgoingEdges.length > 0 && outgoingEdges.some(e => e.label) && (
-                  <div className="px-4 pb-3 flex gap-2">
-                    {outgoingEdges.filter(e => e.label).map((edge, i) => (
-                      <span key={i} className="text-[10px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        {edge.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {!isLast && (
-                <div className="flex justify-center py-2">
-                  <div className="relative flex flex-col items-center">
-                    <div className="w-px h-6 bg-gradient-to-b from-[var(--pc-border)] to-transparent dark:from-[var(--pc-border-strong)]" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--pc-border)] -mt-0.5 dark:bg-[var(--pc-border-strong)]" />
-                    <div className="w-px h-6 bg-gradient-to-b from-transparent to-[var(--pc-border)] dark:from-transparent dark:to-[var(--pc-border-strong)]" />
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {conditionEdges.length > 0 && (
-        <div className="mt-8 p-5 rounded-2xl bg-[var(--pc-bg-surface)] border border-pc-border">
-          <h4 className="text-sm font-medium text-pc-text-secondary mb-4 flex items-center gap-2">
-            <GitFork size={14} className="text-amber-400" />
-            条件分支
-          </h4>
-          <div className="space-y-2">
-            {conditionEdges.map((edge, idx) => {
-              const sourceNode = flow.nodes.find(n => n.id === edge.source);
-              const targetNode = flow.nodes.find(n => n.id === edge.target);
-              return (
-                <div key={edge.id || `edge-${idx}`} className="flex items-center gap-3 text-sm">
-                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20">{edge.label}</span>
-                  <span className="text-pc-text-muted">{sourceNode?.label || '?'} </span>
-                  <ArrowRight size={12} className="text-pc-text-faint" />
-                  <span className="text-pc-text-secondary">{targetNode?.label || '?'}</span>
-                </div>
-              );
-            })}
+      <main className="flex-1 overflow-hidden">
+        <div className="h-full flex">
+          <div className={`flex-1 overflow-y-auto p-6 transition-all ${editPanelVisible ? 'pr-0' : ''}`}>
+            {viewMode === 'graph' ? (
+              <FlowGraphView flow={rule.flow} />
+            ) : (
+              <FlowListView flow={rule.flow} />
+            )}
           </div>
+          <EditSidePanel
+            visible={editPanelVisible}
+            rule={rule}
+            description={editDescription}
+            setDescription={setEditDescription}
+            attachments={attachments}
+            setAttachments={setAttachments}
+            onClose={closeEditPanel}
+            onEdit={onEdit}
+          />
         </div>
-      )}
-
-      <div className="mt-6 flex items-center justify-center gap-6 text-xs text-pc-text-muted">
-        <div className="flex items-center gap-2"><Circle size={8} className="text-emerald-400" />开始</div>
-        <div className="flex items-center gap-2"><Bot size={10} className="text-cyan-400" />技能</div>
-        <div className="flex items-center gap-2"><GitFork size={10} className="text-amber-400" />条件</div>
-        <div className="flex items-center gap-2"><Square size={8} className="text-zinc-400" />结束</div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -1526,7 +1533,7 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
             <p className="text-xs text-pc-text-muted">{rule.description}</p>
           </div>
 
-          {messages.length > 0 && (
+          {(messages.length > 0 || isRunning) && (
             <div className="space-y-3 mb-4">
               {messages.map((msg) => (
                 <div key={msg.id}>
@@ -1592,13 +1599,13 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
           )}
         </div>
         <div className="shrink-0 px-6 py-4 border-t border-pc-border flex justify-end gap-3">
-          {!isRunning && !report && messages.length === 0 && (
+          {!isRunning && (
             <button
               onClick={onExecute}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
             >
               <Play size={14} />
-              执行
+              {report ? '重新执行' : '执行'}
             </button>
           )}
           <button
@@ -1609,6 +1616,138 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
             关闭
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EditSidePanel({ visible, rule, description, setDescription, attachments, setAttachments, onClose, onEdit }: {
+  visible: boolean;
+  rule: Rule;
+  description: string;
+  setDescription: (v: string) => void;
+  attachments: Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>;
+  setAttachments: React.Dispatch<React.SetStateAction<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>>;
+  onClose: () => void;
+  onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void;
+}) {
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        try {
+          const compressed = await compressAgentImage(file);
+          const preview = `data:${compressed.mimeType};base64,${compressed.base64}`;
+          setAttachments(prev => [...prev, {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            mimeType: compressed.mimeType,
+            fileName: file.name || 'pasted-image.png',
+            content: compressed.base64,
+            preview,
+          }]);
+        } catch {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1];
+            if (base64.length > AGENT_MAX_BASE64_CHARS) return;
+            setAttachments(prev => [...prev, {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              mimeType: file.type,
+              fileName: file.name || 'pasted-image.png',
+              content: base64,
+              preview: dataUrl,
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  };
+
+  if (!visible) return null;
+
+  return (
+    <div className="h-full w-[360px] shrink-0 border-l border-pc-border bg-[var(--pc-bg-surface)] flex flex-col overflow-hidden">
+      <div className="shrink-0 px-4 py-3 border-b border-pc-border flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-pc-text">编辑智能体</h3>
+          <p className="text-[10px] text-pc-text-muted truncate mt-0.5">{rule.name}</p>
+        </div>
+        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+          <div className="flex items-center gap-2 mb-1.5">
+            <div className={`w-2 h-2 rounded-full ${
+              rule.status === 'active' ? 'bg-emerald-400' :
+              rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
+            }`} />
+            <span className="text-xs text-pc-text font-medium">{rule.name}</span>
+          </div>
+          <p className="text-[10px] text-pc-text-muted line-clamp-2">{rule.description}</p>
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-pc-text-muted">
+            <span>{rule.skills?.length || 0} 个技能</span>
+            <span>·</span>
+            <span>{rule.flow?.nodes?.length || 0} 个节点</span>
+          </div>
+        </div>
+
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          onPaste={handlePaste}
+          placeholder="用自然语言描述修改需求..."
+          className="w-full h-28 p-3 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-xs"
+        />
+
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {attachments.map(att => (
+              <div key={att.id} className="relative group">
+                <img src={att.preview} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-pc-border" />
+                <button
+                  onClick={() => removeAttachment(att.id)}
+                  className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+          <h4 className="text-[10px] font-medium text-pc-text mb-2">示例</h4>
+          <div className="space-y-1">
+            {['在流程末尾增加一个发送邮件通知的步骤', '将触发方式改为每天早上9点定时执行', '在库存检查后增加一个条件判断'].map((example, idx) => (
+              <button key={idx} onClick={() => setDescription(example)} className="block w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors truncate">
+                {example}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 border-t border-pc-border">
+        <button
+          onClick={() => onEdit(description, attachments.length > 0 ? attachments.map(a => ({ mimeType: a.mimeType, fileName: a.fileName, content: a.content })) : undefined)}
+          disabled={(!description.trim() && attachments.length === 0)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
+        >
+          <span>✨</span><span>确认修改</span>
+        </button>
       </div>
     </div>
   );

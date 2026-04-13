@@ -1,4 +1,4 @@
-import { ChevronRight, Trash2, Calendar, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { ChevronRight, Trash2, Calendar, Clock, CheckCircle, XCircle, Loader2, Activity } from 'lucide-react';
 import type { CronJob } from '../../lib/nanobotApi';
 import { getTaskHealth, getStatusColor, getStatusLabel, cronToHuman } from './utils';
 
@@ -77,6 +77,14 @@ export function TaskRow({ job, isSelected, onSelect, onDelete }: Props) {
                     <Loader2 size={12} className="animate-spin" />
                   )}
                   {health.lastRunAgo}
+                </span>
+              )}
+
+              {/* 运行次数 */}
+              {health.runCount > 0 && (
+                <span className="flex items-center gap-1 text-cyan-400">
+                  <Activity size={12} />
+                  {health.runCount}次
                 </span>
               )}
             </div>

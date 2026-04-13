@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square, Paperclip, X, FileText, Eye, EyeOff, Reply } from 'lucide-react';
+import { Send, Square, Paperclip, X, FileText, Eye, EyeOff, Reply, Music, Film, File, AlertCircle } from 'lucide-react';
 import { useT } from '../hooks/useLocale';
 import { useSendShortcut } from '../hooks/useSendShortcut';
 import { SlashCommandMenu } from './SlashCommands';
@@ -35,8 +35,40 @@ interface Props {
   insertRequest?: ComposerInsertRequest | null;
 }
 
-const MAX_BASE64_CHARS = 300 * 1024; // ~225KB real, well under 512KB WS limit (JSON overhead + base64 bloat)
-const MAX_IMAGE_PIXELS = 1280; // Max dimension for resize
+const MAX_BASE64_CHARS = 300 * 1024;
+const MAX_IMAGE_PIXELS = 1280;
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_CHARS = 200 * 1024;
+
+const SUPPORTED_MIME_PREFIXES = ['image/', 'audio/', 'video/', 'application/pdf', 'text/'];
+const SUPPORTED_EXTENSIONS = new Set([
+  '.pdf', '.txt', '.md', '.csv', '.json', '.xml', '.html', '.css', '.js', '.ts', '.py',
+  '.java', '.c', '.cpp', '.h', '.sh', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz',
+]);
+
+function isSupportedFile(file: File): boolean {
+  if (file.type && SUPPORTED_MIME_PREFIXES.some(prefix => file.type.startsWith(prefix))) return true;
+  const ext = '.' + file.name.split('.').pop()!.toLowerCase();
+  return SUPPORTED_EXTENSIONS.has(ext);
+}
+
+function isImageMime(mime: string): boolean {
+  return mime.startsWith('image/');
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const b64 = dataUrl.split(',')[1] || '';
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 function compressImage(file: File, maxBase64Chars: number): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
@@ -82,6 +114,13 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function FileIcon({ mimeType }: { mimeType: string }) {
+  if (mimeType.startsWith('audio/')) return <Music size={16} className="text-purple-400 shrink-0" />;
+  if (mimeType.startsWith('video/')) return <Film size={16} className="text-blue-400 shrink-0" />;
+  if (mimeType === 'application/pdf') return <FileText size={16} className="text-red-400 shrink-0" />;
+  return <File size={16} className="text-orange-400 shrink-0" />;
 }
 
 function toQuotedContext(text: string): string {
@@ -170,20 +209,38 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
   const addFiles = useCallback(async (fileList: FileList | File[]) => {
     const newFiles: FileAttachment[] = [];
     for (const file of Array.from(fileList)) {
-      if (file.size > 20 * 1024 * 1024) continue; // 20MB max
-      // Only images are supported — the OpenClaw gateway drops non-image attachments
-      if (!file.type.startsWith('image/')) continue;
-      // Compress images to fit WS payload limit
-      const compressed = await compressImage(file, MAX_BASE64_CHARS);
-      const base64 = compressed.base64;
-      const mimeType = compressed.mimeType;
-      newFiles.push({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        file,
-        base64,
-        mimeType,
-        preview: `data:${mimeType};base64,${base64}`,
-      });
+      if (file.size > MAX_FILE_SIZE) continue;
+      if (!isSupportedFile(file)) continue;
+
+      if (isImageMime(file.type)) {
+        const compressed = await compressImage(file, MAX_BASE64_CHARS);
+        const base64 = compressed.base64;
+        const mimeType = compressed.mimeType;
+        newFiles.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          file,
+          base64,
+          mimeType,
+          preview: `data:${mimeType};base64,${base64}`,
+        });
+      } else {
+        const base64 = await readFileAsBase64(file);
+        if (base64.length > MAX_BASE64_CHARS && !isImageMime(file.type)) {
+          newFiles.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            file,
+            base64,
+            mimeType: file.type || 'application/octet-stream',
+          });
+        } else {
+          newFiles.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            file,
+            base64,
+            mimeType: file.type || 'application/octet-stream',
+          });
+        }
+      }
     }
     setFiles(prev => [...prev, ...newFiles]);
   }, []);
@@ -203,6 +260,11 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
       setShowSlash(false);
       onCancelReply?.();
       if (sessionKey) draftsRef.current.delete(sessionKey);
+      return;
+    }
+
+    const totalAttachmentSize = files.reduce((sum, f) => sum + f.base64.length, 0);
+    if (totalAttachmentSize > MAX_TOTAL_ATTACHMENT_CHARS) {
       return;
     }
 
@@ -348,7 +410,7 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
                   {f.preview ? (
                     <img src={f.preview} alt="" className="h-8 w-8 rounded-lg object-cover" />
                   ) : (
-                    <FileText size={16} className="text-pc-text-muted shrink-0" />
+                    <FileIcon mimeType={f.mimeType} />
                   )}
                   <div className="min-w-0 max-w-[120px]">
                     <div className="truncate text-pc-text">{f.file.name}</div>
@@ -363,6 +425,16 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
                   </button>
                 </div>
               ))}
+              {(() => {
+                const total = files.reduce((sum, f) => sum + f.base64.length, 0);
+                if (total <= MAX_TOTAL_ATTACHMENT_CHARS) return null;
+                return (
+                  <div className="flex items-center gap-1 px-2 py-1 text-xs text-red-400">
+                    <AlertCircle size={12} />
+                    <span>{`Total exceeds ${formatSize(MAX_TOTAL_ATTACHMENT_CHARS)} limit`}</span>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -399,7 +471,7 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
               multiple
               className="hidden"
               onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
-              accept="image/*"
+              accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.json,.xml,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
             />
 
             <textarea
@@ -438,7 +510,7 @@ export function ChatInput({ onSend, onNewSession, onAbort, isGenerating, disable
             ) : (
               <button
                 onClick={handleSubmit}
-                disabled={(!text.trim() && files.length === 0) || disabled}
+                disabled={(!text.trim() && files.length === 0) || disabled || files.reduce((sum, f) => sum + f.base64.length, 0) > MAX_TOTAL_ATTACHMENT_CHARS}
                 aria-label={t('chat.send')}
                 className="shrink-0 h-11 px-5 rounded-2xl bg-[var(--pc-accent)] text-white font-semibold text-sm hover:opacity-90 shadow-[0_8px_24px_rgba(var(--pc-accent-rgb),0.15)] disabled:opacity-30 disabled:shadow-none transition-all flex items-center gap-2"
               >
