@@ -111,6 +111,7 @@ export interface RuleFlowNode {
   skillName?: string;
   label: string;
   condition?: string;
+  expression?: string;
   loopConfig?: { maxIterations: number; condition: string };
   index?: number;
   input?: Record<string, unknown>;
@@ -142,6 +143,7 @@ export interface RuleSkillRef {
 export interface Rule {
   id: string;
   name: string;
+  displayName?: string;
   description: string;
   status: 'active' | 'draft' | 'disabled';
   triggerType: 'manual' | 'cron' | 'webhook';
@@ -457,10 +459,10 @@ export class NanobotApiClient {
     return this.request(`/v1/admin/assets?${qs.toString()}`);
   }
 
-  async downloadAsset(assetId: string): Promise<Blob> {
+  async downloadAsset(assetId: string, role?: string): Promise<Blob> {
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    const url = `${this.baseUrl.replace(/\/$/, '')}/v1/admin/assets/${encodeURIComponent(assetId)}/download`;
+    const url = `${this.baseUrl.replace(/\/$/, '')}/v1/admin/assets/${encodeURIComponent(assetId)}/download${role ? `?role=${role}` : ''}`;
     const response = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new ApiError(`Download failed: ${response.status}`, response.status, url);
     return response.blob();

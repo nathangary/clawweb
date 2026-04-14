@@ -307,7 +307,7 @@ export function FlowGraphView({ flow }: FlowGraphViewProps) {
           label: node.label || '未命名',
           skillId: node.skillId,
           skillName: node.skillName,
-          condition: node.condition,
+          condition: node.expression || node.condition,
           loopConfig: node.loopConfig,
           input: node.input,
           output: node.output,
@@ -320,14 +320,19 @@ export function FlowGraphView({ flow }: FlowGraphViewProps) {
     let rfEdges: Edge[] = [];
 
     if (validEdges.length > 0) {
-      rfEdges = validEdges.map((edge, idx) => {
+      rfEdges = validEdges.map((edge: any, idx) => {
         const sourceNode = flowNodes.find((n: FlowNode) => n.id === edge.source);
         const isLoopBack = sourceNode?.type === 'loop' && (edge.label === '循环' || edge.label === 'loop' || edge.label === 'retry' || edge.target === edge.source);
         const isConditionEdge = sourceNode?.type === 'condition';
 
+        let resolvedLabel = edge.label;
+        if (!resolvedLabel && edge.condition) {
+          resolvedLabel = edge.condition === 'true' ? '是' : edge.condition === 'false' ? '否' : edge.condition;
+        }
+
         let sourceHandle: string | undefined;
         if (sourceNode?.type === 'condition') {
-          sourceHandle = edge.label === '是' || edge.label === 'yes' || edge.label === 'true' || edge.label === 'sufficient' ? 'yes' : 'no';
+          sourceHandle = resolvedLabel === '是' || resolvedLabel === 'yes' || resolvedLabel === 'true' || resolvedLabel === 'sufficient' ? 'yes' : 'no';
         } else if (sourceNode?.type === 'loop') {
           sourceHandle = isLoopBack ? 'loop' : 'done';
         }
@@ -336,7 +341,7 @@ export function FlowGraphView({ flow }: FlowGraphViewProps) {
           id: edge.id || `e-${idx}`,
           source: edge.source,
           target: edge.target,
-          label: edge.label || undefined,
+          label: resolvedLabel,
           type: isLoopBack ? 'loopback' : isConditionEdge ? 'condition' : 'default',
           sourceHandle,
           animated: isLoopBack,

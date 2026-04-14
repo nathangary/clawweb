@@ -3,7 +3,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { LazyMarkdown } from './LazyMarkdown';
 import { HtmlPreview, extractHtmlPath } from './HtmlPreview';
-import { DocumentPreview, extractDocuments, extractImages } from './DocumentPreview';
+import { DocumentPreview, extractDocuments } from './DocumentPreview';
 import type { ChatMessage as ChatMessageType, MessageBlock } from '../types';
 import { useTheme } from '../hooks/useTheme';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -560,10 +560,6 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
             )
           )}
           {isUser && renderAttachmentBlocks(message.blocks)}
-
-          {message.multimodalResponse && extractImages(message.multimodalResponse).map((img, i) => (
-            <ImageBlock key={`img-${i}`} src={`/api/v1/admin/assets/${img.assetId}/download`} alt={img.fileName} />
-          ))}
 
           {extractHtmlPath(message.content || '') && (
             <HtmlPreview filePath={extractHtmlPath(message.content || '') as string} />

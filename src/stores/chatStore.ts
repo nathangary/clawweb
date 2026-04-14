@@ -130,12 +130,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (m.multimodal_response?.media) {
             for (const item of m.multimodal_response.media) {
               if (item.type === 'image' && item.asset_id) {
+                const assetRole = m.role === 'user' ? 'user' : undefined;
                 try {
-                  const blob = await api.downloadAsset(item.asset_id);
+                  const blob = await api.downloadAsset(item.asset_id, assetRole);
                   const base64 = await blobToBase64(blob);
                   blocks.push({ type: 'image', mediaType: item.mime_type || 'image/jpeg', data: base64 });
                 } catch {
-                  blocks.push({ type: 'image', mediaType: item.mime_type || 'image/jpeg', url: `/api/v1/admin/assets/${item.asset_id}/download` });
+                  const roleParam = assetRole ? `?role=${assetRole}` : '';
+                  blocks.push({ type: 'image', mediaType: item.mime_type || 'image/jpeg', url: `/api/v1/admin/assets/${item.asset_id}/download${roleParam}` });
                 }
               } else if (item.type === 'image' && item.url) {
                 blocks.push({ type: 'image', mediaType: item.mime_type || 'image/jpeg', url: item.url });

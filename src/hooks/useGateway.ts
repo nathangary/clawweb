@@ -135,6 +135,8 @@ export function useGateway() {
     if (key.startsWith('transport:') && client) {
       const chatId = key.replace('transport:', '');
       client.setChatId(chatId);
+    } else if (client) {
+      client.setChatId('web');
     }
   }, [getClient, getApiClient]);
 

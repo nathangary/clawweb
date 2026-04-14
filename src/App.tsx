@@ -232,7 +232,7 @@ export default function App() {
     )}
     {agentOrchestratorOpen && (
       <ErrorBoundary>
-        <AgentOrchestratorPage onClose={() => setAgentOrchestratorOpen(false)} getClient={getClient} getApiClient={getApiClient} />
+        <AgentOrchestratorPage onClose={() => { switchSession('transport:web'); setAgentOrchestratorOpen(false); }} getClient={getClient} getApiClient={getApiClient} />
       </ErrorBoundary>
     )}
     {historyFilesOpen && getApiClient() && (

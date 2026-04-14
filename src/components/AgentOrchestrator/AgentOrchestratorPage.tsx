@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plus, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, Bot, Zap, GitFork, Loader2, Search, Activity, CheckCircle, Power, PowerOff } from 'lucide-react';
 import type { NanobotGatewayClient, NanobotOutboundEvent } from '../../lib/nanobotGateway';
 import type { NanobotApiClient } from '../../lib/nanobotApi';
-import { loadRules, saveRule, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
+import { loadRules, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
 import { ToastContainer, type Toast } from '../Toast';
 import { CardSkeleton } from '../Skeleton';
 import { LazyMarkdown } from '../LazyMarkdown';
@@ -64,6 +64,8 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [testRunReport, setTestRunReport] = useState<string | null>(null);
   const [testRunDocs, setTestRunDocs] = useState<DocumentInfo[]>([]);
   const [testRunImages, setTestRunImages] = useState<DocumentInfo[]>([]);
+  const [editMessages, setEditMessages] = useState<GenerationMessage[]>([]);
+  const [editPanelVisible, setEditPanelVisible] = useState(false);
   const eventHandlerRef = useRef<(() => void) | null>(null);
 
   const dismissToast = useCallback((id: string) => {
@@ -324,12 +326,20 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                 }
                 return result;
               }
-              return validEdges.map(edge => ({
-                id: `e-${edge.from}-${edge.to}`,
-                source: edge.from,
-                target: edge.to,
-                label: edge.label || (edge.condition ? (edge.condition === 'sufficient' ? '是' : '否') : ''),
-              }));
+              return validEdges.map(edge => {
+                const src = edge.from || edge.source;
+                const tgt = edge.to || edge.target;
+                let label = edge.label || '';
+                if (!label && edge.condition) {
+                  label = edge.condition === 'true' ? '是' : edge.condition === 'false' ? '否' : edge.condition;
+                }
+                return {
+                  id: edge.id || `e-${src}-${tgt}`,
+                  source: src,
+                  target: tgt,
+                  label,
+                };
+              });
             };
 
             const normalizedNodes = normalizeNodes(rawNodes);
@@ -344,6 +354,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
             const newRule: Rule = {
               id: generateRuleId(),
               name: ruleData.name || '未命名规则',
+              displayName: ruleData.displayName || ruleData.display_name || undefined,
               description: ruleData.description || description,
               status: 'draft',
               triggerType: normalizeTriggerType(ruleData.triggerType),
@@ -360,18 +371,14 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
               flowType: 'graph',
               systemPrompt: parsed.systemPrompt || '',
             };
-            const saved = await saveRule(newRule);
-            if (saved) {
-              invalidateRulesCache();
-              await fetchRules();
-              await fetchMonitorStats();
-              setDescription('');
-              setShowCreate(false);
-              showToast('success', `智能体「${saved.name}」已创建成功`, 4000);
-              setSelectedRule(saved);
-            } else {
-              showToast('error', '智能体保存失败，请重试');
-            }
+            invalidateRulesCache();
+            const latestRules = await loadRules();
+            setRules(latestRules);
+            setDescription('');
+            setShowCreate(false);
+            const createdRule = latestRules.find(r => r.name === newRule.name) || newRule;
+            showToast('success', `智能体「${createdRule.displayName || createdRule.name}」已创建成功`, 4000);
+            setSelectedRule(createdRule);
           } catch (e) {
             console.error('解析规则失败:', e);
             showToast('error', '智能体生成失败，请重试');
@@ -405,7 +412,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     setIsActivating(true);
     setActivateMessages([]);
     setActivatingRule(rule);
-    const fullMessage = `请激活以下智能体规则：\n\n名称：${rule.name}\n描述：${rule.description}\n触发类型：${rule.triggerType}\n\n请执行激活操作并返回结果。`;
+    const fullMessage = `请激活以下智能体规则：\n\n名称：${rule.name}\n显示名称：${rule.displayName || rule.name}\n描述：${rule.description}\n触发类型：${rule.triggerType}\n\n请执行激活操作并返回结果。`;
     client.send(fullMessage);
 
     let handled = false;
@@ -476,7 +483,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
               invalidateRulesCache();
               await fetchRules();
               await fetchMonitorStats();
-              showToast('success', `智能体「${updated.name}」已激活`, 4000);
+              showToast('success', `智能体「${updated.displayName || updated.name}」已激活`, 4000);
             } else {
               showToast('error', '激活失败，请重试');
             }
@@ -529,7 +536,14 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     setTestRunReport(null);
 
     const fullMessage = `${TEST_RUN_PROMPT} ${testRunRule.name}`;
-    client.send(fullMessage);
+    client.send(fullMessage, undefined, {
+      session_params: {
+        context_policy: {
+          enabled: true,
+          policy_id: "agent_process_rule_path_policy"
+        }
+      }
+    });
 
     let handled = false;
 
@@ -586,7 +600,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
           }
         }
         client.ack(event.eventId);
-      } else if (event.eventType === 'final') {
+      } else if (event.eventType === 'final' && event.done) {
         handled = true;
         client.ack(event.eventId);
         eventHandlerRef.current?.();
@@ -621,14 +635,13 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     eventHandlerRef.current = unsubscribe;
   };
 
-  const handleDeleteRule = async (ruleId: string) => {
-    const rule = rules.find(r => r.id === ruleId);
-    const ok = await deleteRule(ruleId);
+  const handleDeleteRule = async (rule: Rule) => {
+    const ok = await deleteRule(rule.name);
     if (ok) {
       invalidateRulesCache();
-      await fetchRules();
-      await fetchMonitorStats();
-      showToast('success', `智能体「${rule?.name || '未知'}」已删除`);
+      const latestRules = await loadRules();
+      setRules(latestRules);
+      showToast('success', `智能体「${rule.displayName || rule.name}」已删除`);
     } else {
       showToast('error', '删除智能体失败');
     }
@@ -641,7 +654,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       invalidateRulesCache();
       await fetchRules();
       await fetchMonitorStats();
-      showToast('success', `智能体「${updated.name}」已${newStatus === 'active' ? '启用' : '停用'}`);
+      showToast('success', `智能体「${updated.displayName || updated.name}」已${newStatus === 'active' ? '启用' : '停用'}`);
     } else {
       showToast('error', '操作失败');
     }
@@ -657,179 +670,97 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
 
     client.setChatId(`agentloop-${Date.now()}`);
 
-    const ruleContext = JSON.stringify({
-      name: selectedRule.name,
-      description: selectedRule.description,
-      triggerType: selectedRule.triggerType,
-      triggerConfig: selectedRule.triggerConfig,
-      skills: selectedRule.skills,
-      flow: selectedRule.flow,
-      systemPrompt: selectedRule.systemPrompt,
-    }, null, 2);
-
-    const fullMessage = `请帮我修改以下智能体规则。当前规则如下：\n\n\`\`\`json\n${ruleContext}\n\`\`\`\n\n我的修改需求如下：${description || '(见图片)' }\n\n请返回修改后的完整规则 JSON，格式与上面相同。`;
+    const fullMessage = `请用agent-builder技能帮我修改智能体「${selectedRule.name}」。\n\n修改需求：${description || '(见图片)'}`;
     client.send(fullMessage, attachments);
 
     let handled = false;
 
-    const handleEditEvent = (event: NanobotOutboundEvent) => {
+    const handleEditEvent = async (event: NanobotOutboundEvent) => {
       if (handled) return;
+      const currentRule = selectedRule;
+      const currentRuleId = currentRule?.id;
+      const currentRuleName = currentRule?.name;
+      const currentRuleDisplayName = currentRule?.displayName || currentRule?.name;
+      if (!currentRule) return;
       
       if (event.eventType === 'progress') {
+        const text = event.content;
+        const toolHint = event.metadata?._tool_hint;
+        const thinking = event.metadata?._thinking as string | undefined;
+
+        setEditMessages(prev => {
+          const msgs = [...prev];
+          if (thinking) {
+            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
+            if (thinkIdx >= 0) {
+              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
+            } else {
+              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
+            }
+          }
+          if (toolHint && typeof toolHint === 'string') {
+            const toolInfo = extractToolInfo(toolHint);
+            if (toolInfo) {
+              const existingToolIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingToolIdx < 0) {
+                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
+              }
+            }
+          }
+          if (text) {
+            const textTarget = msgs[msgs.length - 1];
+            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
+              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
+            } else {
+              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
+            }
+          }
+          return msgs;
+        });
         client.ack(event.eventId);
       } else if (event.eventType === 'tool_hint') {
+        const toolContent = event.content;
+        if (toolContent) {
+          const toolInfo = extractToolInfo(toolContent);
+          if (toolInfo) {
+            setEditMessages(prev => {
+              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
+              if (existingIdx < 0) {
+                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
+              }
+              return prev;
+            });
+          }
+        }
         client.ack(event.eventId);
-      } else if (event.eventType === 'final' && event.content) {
+      } else if (event.eventType === 'final') {
         handled = true;
         client.ack(event.eventId);
         eventHandlerRef.current?.();
         eventHandlerRef.current = null;
-        (async () => {
-          try {
-            let jsonStr = event.content.trim();
-            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-            if (codeBlockMatch) {
-              jsonStr = codeBlockMatch[1].trim();
-            } else {
-              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
-              if (braceMatch) {
-                jsonStr = braceMatch[0];
-              }
-            }
-            let parsed: any;
-            try {
-              parsed = JSON.parse(jsonStr);
-            } catch {
-              const multimodal = event.multimodalResponse || event.multimodal_response;
-              if (multimodal?.content) {
-                jsonStr = multimodal.content.trim();
-                const mmCodeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-                if (mmCodeBlockMatch) {
-                  jsonStr = mmCodeBlockMatch[1].trim();
-                } else {
-                  const mmBraceMatch = jsonStr.match(/\{[\s\S]*\}/);
-                  if (mmBraceMatch) {
-                    jsonStr = mmBraceMatch[0];
-                  }
-                }
-                try {
-                  parsed = JSON.parse(jsonStr);
-                } catch {
-                  const jsonDocs = extractJsonDocuments(multimodal);
-                  if (jsonDocs.length > 0) {
-                    const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
-                    if (jsonData) {
-                      parsed = jsonData as any;
-                    } else {
-                      throw new Error('Failed to fetch JSON asset');
-                    }
-                  } else {
-                    throw new Error('No valid JSON found in content or multimodalResponse');
-                  }
-                }
-              } else {
-                const jsonDocs = extractJsonDocuments(multimodal || {});
-                if (jsonDocs.length > 0) {
-                  const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
-                  if (jsonData) {
-                    parsed = jsonData as any;
-                  } else {
-                    throw new Error('Failed to fetch JSON asset');
-                  }
-                } else {
-                  throw new Error('No valid JSON found in content or multimodalResponse');
-                }
-              }
-            }
-            const ruleData = parsed.rule || parsed;
-            
-            const rawNodes = ruleData.flow?.nodes || [];
-            const rawEdges = ruleData.flow?.edges || [];
-
-            const normalizeNodes = (nodes: any[]): any[] => {
-              return nodes.map(node => {
-                const skillRef = ruleData.skills?.find((s: any) => s.skillId === node.skillId);
-                return {
-                  id: node.id || `node-${Math.random().toString(36).slice(2, 8)}`,
-                  type: node.type === 'trigger' ? 'start' :
-                        node.type === 'end' ? 'end' :
-                        node.type === 'condition' ? 'condition' :
-                        node.type === 'action' ? 'skill' : node.type,
-                  label: node.label || node.name || skillRef?.name || '未命名',
-                  skillId: node.skillId,
-                  skillName: skillRef?.name || node.skillName || '',
-                  index: node.index,
-                  condition: node.expression || node.condition,
-                  input: node.input,
-                  output: node.output,
-                };
-              });
-            };
-
-            const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
-              const validEdges = edges.filter(e => (e.from && e.to) || (e.source && e.target));
-              if (validEdges.length === 0 && normalizedNodes.length > 1) {
-                const result: any[] = [];
-                for (let i = 0; i < normalizedNodes.length - 1; i++) {
-                  result.push({
-                    id: `e-${normalizedNodes[i].id}-${normalizedNodes[i + 1].id}`,
-                    source: normalizedNodes[i].id,
-                    target: normalizedNodes[i + 1].id,
-                    label: '',
-                  });
-                }
-                return result;
-              }
-              return validEdges.map(edge => ({
-                id: `e-${edge.from}-${edge.to}`,
-                source: edge.from,
-                target: edge.to,
-                label: edge.label || (edge.condition ? (edge.condition === 'sufficient' ? '是' : '否') : ''),
-              }));
-            };
-
-            const normalizedNodes = normalizeNodes(rawNodes);
-            const normalizedEdges = normalizeEdges(rawEdges, normalizedNodes);
-            
-            const normalizeTriggerType = (t: string): 'manual' | 'cron' | 'webhook' => {
-              if (t === 'cron' || t === 'schedule' || t === 'timed') return 'cron';
-              if (t === 'webhook' || t === 'event') return 'webhook';
-              return 'manual';
-            };
-
-            const updatedRule: Rule = {
-              ...selectedRule,
-              name: ruleData.name || selectedRule.name,
-              description: ruleData.description || selectedRule.description,
-              triggerType: normalizeTriggerType(ruleData.triggerType || selectedRule.triggerType),
-              triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig || selectedRule.triggerConfig),
-              skills: ruleData.skills || selectedRule.skills,
-              flow: {
-                nodes: normalizedNodes,
-                edges: normalizedEdges,
-              },
-              flowType: ruleData.flowType || selectedRule.flowType,
-              systemPrompt: parsed.systemPrompt || selectedRule.systemPrompt,
-            };
-
-            const saved = await saveRule(updatedRule);
-            if (saved) {
-              invalidateRulesCache();
-              await fetchRules();
-              await fetchMonitorStats();
-              setSelectedRule(saved);
-              showToast('success', `智能体「${saved.name}」已更新`, 4000);
-            } else {
-              showToast('error', '智能体保存失败，请重试');
-            }
-          } catch (e) {
-            console.error('解析修改后的规则失败:', e);
-            showToast('error', '规则修改失败，请重试');
+        setEditPanelVisible(false);
+        setEditMessages([]);
+        invalidateRulesCache();
+        const timeoutPromise = new Promise<Rule[]>((_, reject) => {
+          setTimeout(() => reject(new Error('加载规则超时')), 15000);
+        });
+        try {
+          const latestRules = await Promise.race([loadRules(), timeoutPromise]);
+          setRules(latestRules);
+          const updatedRule = latestRules.find(r => r.name === currentRuleName) || latestRules.find(r => r.id === currentRuleId);
+          if (updatedRule) {
+            setSelectedRule(updatedRule);
           }
-        })();
+          showToast('success', `智能体「${currentRuleDisplayName}」修改成功`, 4000);
+        } catch (e) {
+          console.error('加载规则失败:', e);
+          showToast('error', '修改成功但刷新规则失败，请手动刷新页面');
+        }
       } else if (event.eventType === 'error') {
         handled = true;
-        showToast('error', '修改规则时出错');
+        setEditPanelVisible(false);
+        setEditMessages([]);
+        showToast('error', `修改规则时出错: ${event.content || '未知错误'}`);
       }
     };
 
@@ -842,7 +773,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     if (filterStatus !== 'all' && r.status !== filterStatus) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      return r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q);
+      return (r.displayName || r.name).toLowerCase().includes(q) || r.description.toLowerCase().includes(q);
     }
     return true;
   });
@@ -850,7 +781,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   if (selectedRule) {
     return (
       <>
-        <RuleDetail rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={handleEditRule} onTestRun={() => openTestRunModal(selectedRule)} />
+        <RuleDetail key={selectedRule.id} rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={handleEditRule} onTestRun={() => openTestRunModal(selectedRule)} editMessages={editMessages} setEditMessages={setEditMessages} editPanelVisible={editPanelVisible} setEditPanelVisible={setEditPanelVisible} />
         {showTestRun && testRunRule && (
           <TestRunModal
             rule={testRunRule}
@@ -979,7 +910,7 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
                   key={rule.id}
                   rule={rule}
                   onClick={() => setSelectedRule(rule)}
-                  onDelete={() => handleDeleteRule(rule.id)}
+                  onDelete={() => handleDeleteRule(rule)}
                   onToggle={() => handleToggleStatus(rule)}
                   onActivate={() => handleActivateRule(rule)}
                   onTestRun={() => openTestRunModal(rule)}
@@ -1072,7 +1003,7 @@ function AgentCard({ rule, onClick, onDelete, onToggle, onActivate, onTestRun }:
             } />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-medium text-pc-text truncate">{rule.name}</h3>
+            <h3 className="text-sm font-medium text-pc-text truncate">{rule.displayName || rule.name}</h3>
             <p className="text-xs text-pc-text-muted mt-0.5 line-clamp-2">{rule.description}</p>
           </div>
         </div>
@@ -1279,7 +1210,7 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
             </div>
           )}
           {isGenerating && genMessages.length > 0 && (
-            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-48 overflow-y-auto">
+            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-64 overflow-y-auto">
               <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
                 <Loader2 size={14} className="animate-spin text-pc-accent" />
                 <span>生成中...</span>
@@ -1289,7 +1220,7 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
                   <div key={msg.id} className="text-xs">
                     {msg.type === 'thinking' && (
                       <div className="flex items-start gap-2 text-pc-text-muted">
-                        <span>💭</span><span>{msg.content.slice(0, 150)}...</span>
+                        <span>💭</span><span className="whitespace-pre-wrap break-words">{msg.content}</span>
                       </div>
                     )}
                     {msg.type === 'tool_use' && (
@@ -1299,7 +1230,7 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
                       </div>
                     )}
                     {msg.type === 'text' && (
-                      <div className="text-pc-text-muted">{msg.content.slice(0, 80)}...</div>
+                      <div className="text-pc-text-muted whitespace-pre-wrap break-words">{msg.content}</div>
                     )}
                   </div>
                 ))}
@@ -1348,7 +1279,7 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-pc-text">激活智能体</h2>
-              <p className="text-xs text-pc-text-muted mt-0.5">{rule.name}</p>
+              <p className="text-xs text-pc-text-muted mt-0.5">{rule.displayName || rule.name}</p>
             </div>
             <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
               <X size={18} />
@@ -1362,7 +1293,7 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
                 rule.status === 'active' ? 'bg-emerald-400' :
                 rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
               }`} />
-              <span className="text-sm text-pc-text font-medium">{rule.name}</span>
+              <span className="text-sm text-pc-text font-medium">{rule.displayName || rule.name}</span>
             </div>
             <p className="text-xs text-pc-text-muted">{rule.description}</p>
           </div>
@@ -1409,15 +1340,17 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
   );
 }
 
-function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: () => void; onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void; onTestRun: () => void }) {
+function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, setEditMessages, editPanelVisible, setEditPanelVisible }: { rule: Rule; onBack: () => void; onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void; onTestRun: () => void; editMessages: GenerationMessage[]; setEditMessages: React.Dispatch<React.SetStateAction<GenerationMessage[]>>; editPanelVisible: boolean; setEditPanelVisible: (v: boolean) => void }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
-  const [editPanelVisible, setEditPanelVisible] = useState(false);
   const [editDescription, setEditDescription] = useState('');
   const [attachments, setAttachments] = useState<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>([]);
+  const [isEditing, setIsEditing] = useState(false);
 
   const openEditPanel = () => {
     setEditDescription('');
     setAttachments([]);
+    setIsEditing(false);
+    setEditMessages([]);
     setEditPanelVisible(true);
   };
 
@@ -1425,7 +1358,24 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: (
     setEditPanelVisible(false);
     setEditDescription('');
     setAttachments([]);
+    setIsEditing(false);
   };
+
+  const handleEdit = (description: string, atts?: Array<{ mimeType: string; fileName: string; content: string }>) => {
+    setIsEditing(true);
+    setEditMessages([]);
+    onEdit(description, atts);
+  };
+
+  useEffect(() => {
+    if (!editPanelVisible) {
+      setIsEditing(false);
+    }
+  }, [editPanelVisible]);
+
+  useEffect(() => {
+    setEditPanelVisible(false);
+  }, [rule.id]);
 
   return (
     <div className="fixed inset-0 z-[90] bg-[var(--pc-bg-base)] flex flex-col overflow-hidden">
@@ -1436,7 +1386,7 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: (
               <ChevronRight size={20} className="rotate-180" />
             </button>
             <div>
-              <h1 className="text-base font-semibold text-pc-text">{rule.name}</h1>
+              <h1 className="text-base font-semibold text-pc-text">{rule.displayName || rule.name}</h1>
               <p className="text-[11px] text-pc-text-muted">{rule.description}</p>
             </div>
           </div>
@@ -1481,7 +1431,9 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun }: { rule: Rule; onBack: (
             attachments={attachments}
             setAttachments={setAttachments}
             onClose={closeEditPanel}
-            onEdit={onEdit}
+            onEdit={handleEdit}
+            isEditing={isEditing}
+            messages={editMessages}
           />
         </div>
       </main>
@@ -1514,7 +1466,7 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-pc-text">测试运行</h2>
-              <p className="text-xs text-pc-text-muted mt-0.5">{rule.name}</p>
+              <p className="text-xs text-pc-text-muted mt-0.5">{rule.displayName || rule.name}</p>
             </div>
             <button onClick={onClose} className="p-2 rounded-xl hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
               <X size={18} />
@@ -1528,7 +1480,7 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
                 rule.status === 'active' ? 'bg-emerald-400' :
                 rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
               }`} />
-              <span className="text-sm text-pc-text font-medium">{rule.name}</span>
+              <span className="text-sm text-pc-text font-medium">{rule.displayName || rule.name}</span>
             </div>
             <p className="text-xs text-pc-text-muted">{rule.description}</p>
           </div>
@@ -1621,7 +1573,7 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
   );
 }
 
-function EditSidePanel({ visible, rule, description, setDescription, attachments, setAttachments, onClose, onEdit }: {
+function EditSidePanel({ visible, rule, description, setDescription, attachments, setAttachments, onClose, onEdit, isEditing, messages }: {
   visible: boolean;
   rule: Rule;
   description: string;
@@ -1630,6 +1582,8 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
   setAttachments: React.Dispatch<React.SetStateAction<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>>;
   onClose: () => void;
   onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void;
+  isEditing: boolean;
+  messages: GenerationMessage[];
 }) {
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -1680,7 +1634,7 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
       <div className="shrink-0 px-4 py-3 border-b border-pc-border flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-pc-text">编辑智能体</h3>
-          <p className="text-[10px] text-pc-text-muted truncate mt-0.5">{rule.name}</p>
+          <p className="text-[10px] text-pc-text-muted truncate mt-0.5">{rule.displayName || rule.name}</p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[var(--pc-hover)] text-pc-text-muted transition-colors">
           <X size={16} />
@@ -1694,7 +1648,7 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
               rule.status === 'active' ? 'bg-emerald-400' :
               rule.status === 'draft' ? 'bg-amber-400' : 'bg-zinc-400'
             }`} />
-            <span className="text-xs text-pc-text font-medium">{rule.name}</span>
+            <span className="text-xs text-pc-text font-medium">{rule.displayName || rule.name}</span>
           </div>
           <p className="text-[10px] text-pc-text-muted line-clamp-2">{rule.description}</p>
           <div className="mt-2 flex items-center gap-2 text-[10px] text-pc-text-muted">
@@ -1704,49 +1658,84 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
           </div>
         </div>
 
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onPaste={handlePaste}
-          placeholder="用自然语言描述修改需求..."
-          className="w-full h-28 p-3 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-xs"
-        />
+        {isEditing ? (
+          <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+            <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
+              <Loader2 size={14} className="animate-spin text-pc-accent" />
+              <span>修改中...</span>
+            </div>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {messages.map((msg) => (
+                <div key={msg.id} className="text-xs">
+                  {msg.type === 'thinking' && (
+                    <div className="flex items-start gap-2 text-pc-text-muted">
+                      <span>💭</span><span className="whitespace-pre-wrap break-words">{msg.content}</span>
+                    </div>
+                  )}
+                  {msg.type === 'tool_use' && (
+                    <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
+                      <Zap size={11} className="text-pc-accent" />
+                      <span className="text-pc-text">调用: {msg.name}</span>
+                    </div>
+                  )}
+                  {msg.type === 'text' && (
+                    <div className="text-pc-text-muted whitespace-pre-wrap break-words">{msg.content}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onPaste={handlePaste}
+              placeholder="用自然语言描述修改需求..."
+              className="w-full h-28 p-3 rounded-xl border border-pc-border bg-[var(--pc-bg-base)] text-pc-text placeholder:text-pc-text-muted outline-none focus:ring-2 focus:ring-[var(--pc-accent-dim)] focus:border-[var(--pc-accent-dim)] transition-all resize-none text-xs"
+            />
 
-        {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {attachments.map(att => (
-              <div key={att.id} className="relative group">
-                <img src={att.preview} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-pc-border" />
-                <button
-                  onClick={() => removeAttachment(att.id)}
-                  className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <X size={10} />
-                </button>
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachments.map(att => (
+                  <div key={att.id} className="relative group">
+                    <img src={att.preview} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-pc-border" />
+                    <button
+                      onClick={() => removeAttachment(att.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
-          <h4 className="text-[10px] font-medium text-pc-text mb-2">示例</h4>
-          <div className="space-y-1">
-            {['在流程末尾增加一个发送邮件通知的步骤', '将触发方式改为每天早上9点定时执行', '在库存检查后增加一个条件判断'].map((example, idx) => (
-              <button key={idx} onClick={() => setDescription(example)} className="block w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors truncate">
-                {example}
-              </button>
-            ))}
-          </div>
-        </div>
+            <div className="p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
+              <h4 className="text-[10px] font-medium text-pc-text mb-2">示例</h4>
+              <div className="space-y-1">
+                {['在流程末尾增加一个发送邮件通知的步骤', '将触发方式改为每天早上9点定时执行', '在库存检查后增加一个条件判断'].map((example) => (
+                  <button key={example} onClick={() => setDescription(example)} className="block w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] text-pc-text-muted hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors truncate">
+                    {example}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="shrink-0 px-4 py-3 border-t border-pc-border">
         <button
           onClick={() => onEdit(description, attachments.length > 0 ? attachments.map(a => ({ mimeType: a.mimeType, fileName: a.fileName, content: a.content })) : undefined)}
-          disabled={(!description.trim() && attachments.length === 0)}
+          disabled={(!description.trim() && attachments.length === 0) || isEditing}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--pc-accent)] text-zinc-900 text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_4px_12px_rgba(var(--pc-accent-rgb),0.3)]"
         >
-          <span>✨</span><span>确认修改</span>
+          {isEditing ? (
+            <><Loader2 size={14} className="animate-spin" /><span>修改中...</span></>
+          ) : (
+            <><span>✨</span><span>确认修改</span></>
+          )}
         </button>
       </div>
     </div>

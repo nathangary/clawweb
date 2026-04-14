@@ -71,6 +71,19 @@ export function parseHistoryMessages(rawMsgs: Array<Record<string, any>>): ChatM
     const blocks = parseContent(m.content);
     const role: 'user' | 'assistant' = m.role === 'user' ? 'user' : 'assistant';
 
+    // Extract multimodal_response (snake_case from API) into multimodalResponse (camelCase)
+    const multimodalResponse = m.multimodal_response ? {
+      format: m.multimodal_response.format || 'multimodal',
+      content: m.multimodal_response.content || JSON.stringify(m.multimodal_response.media || []),
+      media: m.multimodal_response.media?.map((media: any) => ({
+        type: media.type,
+        source: media.source,
+        url: media.url,
+        asset_id: media.asset_id,
+        mime_type: media.mime_type,
+      })),
+    } : undefined;
+
     if (m.role === 'toolResult') {
       const toolBlocks: MessageBlock[] = blocks.map(b => {
         if (b.type === 'text') {
@@ -95,7 +108,7 @@ export function parseHistoryMessages(rawMsgs: Array<Record<string, any>>): ChatM
 
     const metadata: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(m)) {
-      if (['content', 'blocks'].includes(k)) continue;
+      if (['content', 'blocks', 'multimodal_response'].includes(k)) continue;
       metadata[k] = v;
     }
 
@@ -106,6 +119,7 @@ export function parseHistoryMessages(rawMsgs: Array<Record<string, any>>): ChatM
       timestamp: m.timestamp || Date.now(),
       blocks,
       metadata,
+      multimodalResponse,
       isSystemEvent: role === 'user' && isSystemEvent(textContent),
     };
   });

@@ -79,6 +79,9 @@ export class NanobotGatewayClient {
   setChatId(chatId: string) {
     this.chatId = chatId;
     this.boundSession = false;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.bindSession();
+    }
   }
 
   onStatus(fn: NanobotStatusHandler) {
@@ -176,12 +179,18 @@ export class NanobotGatewayClient {
   }
 
   private handleMessage(data: NanobotOutboundEvent) {
+    console.log('[GW] handleMessage', data.eventType, data.eventId, 'chatId:', data.chatId, 'sessionKey:', data.sessionKey, 'handlers:', this.eventHandlers.length);
     if (this.processedEventIds.has(data.eventId)) {
+      console.log('[GW] deduplicated:', data.eventId);
       return;
     }
     this.processedEventIds.add(data.eventId);
-    for (const h of this.eventHandlers) {
-      h(data);
+    for (let i = 0; i < this.eventHandlers.length; i++) {
+      try {
+        this.eventHandlers[i](data);
+      } catch (e) {
+        console.error('[GW] handler error:', e, 'handlerIndex:', i, 'eventType:', data.eventType, 'eventId:', data.eventId);
+      }
     }
   }
 
@@ -196,6 +205,19 @@ export class NanobotGatewayClient {
   }
 
   send(message: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>, extraParams?: Record<string, unknown>) {
+    if (!this.boundSession && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.bindSession();
+      return new Promise<void>(resolve => {
+        setTimeout(() => {
+          this._send(message, attachments, extraParams);
+          resolve();
+        }, 100);
+      });
+    }
+    this._send(message, attachments, extraParams);
+  }
+
+  private _send(message: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>, extraParams?: Record<string, unknown>) {
     const msg: Record<string, unknown> = {
       messageId: genId('msg'),
       channel: 'transport',

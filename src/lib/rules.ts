@@ -34,7 +34,8 @@ export async function loadRules(): Promise<Rule[]> {
     try {
       const client = await ensureApiClient();
       const res = await client.getRules();
-      rulesCache = res.applied && res.data.rules ? res.data.rules : [];
+      const rawRules = res.applied && res.data.rules ? res.data.rules : [];
+      rulesCache = rawRules.map((item: any) => item.rule || item);
       return rulesCache;
     } catch (err) {
       console.error('Failed to load rules from API:', err);
