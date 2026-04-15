@@ -1,16 +1,12 @@
-# Stage 1: Build
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-# Stage 2: Serve
 FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY ./dist /usr/share/nginx/html
+COPY ./nginx.conf.template /etc/nginx/conf.d/default.conf.template
+COPY ./docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENV GATEWAY_HOST=host.docker.internal
+ENV GATEWAY_WS_PORT=8787
+ENV GATEWAY_REST_PORT=18790
+
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO /dev/null http://localhost:80/ || exit 1
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

@@ -27,7 +27,7 @@ export function useGateway() {
     if (initRef.current) return;
     initRef.current = true;
     const stored = getStoredCredentials();
-    if (stored?.url && (stored.url.startsWith('ws://') || stored.url.startsWith('wss://'))) {
+    if (stored?.url && (stored.url.startsWith('ws://') || stored.url.startsWith('wss://') || stored.url.startsWith('/'))) {
       useChatStore.getState().setIsConnecting(true);
       isConnectingRef.current = true;
       useChatStore.getState().setConnectError(null);
@@ -162,6 +162,21 @@ export function useGateway() {
     useChatStore.getState().reset();
   }, [disconnect]);
 
+  const deleteSession = useCallback(async (key: string) => {
+    const api = getApiClient();
+    if (!api) return;
+    const res = await api.deleteSession(key);
+    if (res.applied) {
+      useChatStore.getState().setSessions(sessions.filter(s => s.key !== key));
+      if (activeSession === key) {
+        const remaining = sessions.filter(s => s.key !== key);
+        if (remaining.length > 0) {
+          switchSession(remaining[0].key);
+        }
+      }
+    }
+  }, [getApiClient, sessions, activeSession, switchSession]);
+
   const enrichedSessions = sessions.map(s => ({
     ...s,
     isActive: false,
@@ -171,7 +186,7 @@ export function useGateway() {
 
   return {
     status: effectiveStatus, messages, sessions: enrichedSessions, activeSession, isGenerating, isLoadingHistory,
-    sendMessage, abort, switchSession, createNewSession,
+    sendMessage, abort, switchSession, createNewSession, deleteSession,
     authenticated, login, logout, connectError, isConnecting,
     getClient, getApiClient,
   };

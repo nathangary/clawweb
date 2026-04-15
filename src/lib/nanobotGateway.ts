@@ -48,6 +48,12 @@ export type NanobotStatusHandler = (status: NanobotStatus) => void;
 
 export type NanobotStatus = 'disconnected' | 'connecting' | 'connected';
 
+function resolveWsUrl(url: string): string {
+  if (url.startsWith('ws://') || url.startsWith('wss://')) return url;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
 export class NanobotGatewayClient {
   private ws: WebSocket | null = null;
   private eventHandlers: NanobotEventHandler[] = [];
@@ -65,14 +71,14 @@ export class NanobotGatewayClient {
   private boundSession = false;
 
   constructor(wsUrl?: string, authToken?: string, clientId?: string, chatId?: string) {
-    this.wsUrl = wsUrl || `ws://${window.location.hostname}:8787/ws`;
+    this.wsUrl = resolveWsUrl(wsUrl || '/ws');
     this.authToken = authToken || '';
     this.clientId = clientId || 'webchat';
     this.chatId = chatId || `web-${Date.now()}`;
   }
 
   setCredentials(wsUrl: string, authToken?: string) {
-    this.wsUrl = wsUrl;
+    this.wsUrl = resolveWsUrl(wsUrl);
     if (authToken !== undefined) this.authToken = authToken;
   }
 

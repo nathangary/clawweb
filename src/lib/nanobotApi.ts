@@ -231,7 +231,7 @@ export class NanobotApiClient {
   private token: string;
 
   constructor(baseUrl?: string, token?: string) {
-    this.baseUrl = baseUrl || `http://${window.location.hostname}:18790/api`;
+    this.baseUrl = baseUrl || '/api';
     this.token = token || '';
   }
 
@@ -292,6 +292,13 @@ export class NanobotApiClient {
   async getSessions(page = 1, pageSize = 50): Promise<NanobotApiResponse<{ sessions: NanobotSession[] }>> {
     return this.request<{ sessions: NanobotSession[] }>(
       `/v1/admin/sessions?page=${page}&page_size=${pageSize}`
+    );
+  }
+
+  async deleteSession(sessionKey: string): Promise<NanobotApiResponse<{ deleted: boolean }>> {
+    return this.request<{ deleted: boolean }>(
+      `/v1/admin/sessions/${encodeURIComponent(sessionKey)}`,
+      { method: 'DELETE' }
     );
   }
 
@@ -429,6 +436,10 @@ export class NanobotApiClient {
     return this.request('/v1/admin/assets/categories');
   }
 
+  async getAgentAssetCategories(): Promise<NanobotApiResponse<{ categories: AssetCategory[] }>> {
+    return this.request('/v1/admin/assets/categories?category=process');
+  }
+
   async getAssets(params: {
     category?: string;
     scene?: string;
@@ -447,6 +458,37 @@ export class NanobotApiClient {
     sort: string;
   }>> {
     const qs = new URLSearchParams();
+    if (params.category) qs.set('category', params.category);
+    if (params.scene) qs.set('scene', params.scene);
+    if (params.ext) qs.set('ext', params.ext);
+    if (params.q) qs.set('q', params.q);
+    if (params.from_ts) qs.set('from_ts', params.from_ts);
+    if (params.to_ts) qs.set('to_ts', params.to_ts);
+    qs.set('page', String(params.page ?? 1));
+    qs.set('page_size', String(params.page_size ?? 20));
+    qs.set('sort', params.sort ?? 'desc');
+    return this.request(`/v1/admin/assets?${qs.toString()}`);
+  }
+
+  async getAgentAssets(params: {
+    category?: string;
+    scene?: string;
+    ext?: string;
+    q?: string;
+    from_ts?: string;
+    to_ts?: string;
+    page?: number;
+    page_size?: number;
+    sort?: 'asc' | 'desc';
+  } = {}): Promise<NanobotApiResponse<{
+    items: AssetItem[];
+    page: number;
+    page_size: number;
+    total: number;
+    sort: string;
+  }>> {
+    const qs = new URLSearchParams();
+    qs.set('category', 'process');
     if (params.category) qs.set('category', params.category);
     if (params.scene) qs.set('scene', params.scene);
     if (params.ext) qs.set('ext', params.ext);

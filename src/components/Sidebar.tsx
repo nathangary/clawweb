@@ -198,10 +198,12 @@ interface Props {
   onOpenSkillHub?: () => void;
   onOpenAgentOrchestrator?: () => void;
   onOpenHistoryFiles?: () => void;
+  onOpenAgentAssets?: () => void;
   onOpenTasks?: () => void;
+  onOpenWorkspace?: () => void;
 }
 
-export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub, onOpenAgentOrchestrator, onOpenHistoryFiles, onOpenTasks }: Props) {
+export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, splitSession, open, onClose, onRename, onNewSession, onNewSessionForAgent, onOpenDashboard, onOpenSkillHub, onOpenAgentOrchestrator, onOpenHistoryFiles, onOpenAgentAssets, onOpenTasks, onOpenWorkspace }: Props) {
   const t = useT();
   const [filter, setFilter] = useState('');
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -410,9 +412,9 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className="relative shrink-0">
               <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-r from-cyan-400/15 to-violet-500/15 blur-lg" />
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-xl overflow-hidden">
-                <img src="/logo.png" alt="伯俊智能舱" className="h-8 w-8 object-contain" />
-              </div>
+              {/* <div className="relative flex h-8 w-8 items-center justify-center rounded-xl overflow-hidden"> */}
+                {/* <img src="/logo.png" alt="伯俊俊马" className="h-8 w-8 object-contain" /> */}
+              {/* </div> */}
             </div>
             <span className="font-semibold text-sm text-pc-text tracking-wide truncate">{t('sidebar.title')}</span>
           </div>
@@ -535,8 +537,17 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
           </div>
         )}
 
-        {(onOpenDashboard || onOpenSkillHub || onOpenAgentOrchestrator) && (
+        {(onOpenDashboard || onOpenSkillHub || onOpenAgentOrchestrator || onOpenWorkspace) && (
           <div className="px-2 py-2 flex flex-col gap-1 border-b border-pc-border">
+            {onOpenWorkspace && (
+              <button
+                onClick={onOpenWorkspace}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <LayoutDashboard size={16} />
+                <span className="font-medium">我的工作台</span>
+              </button>
+            )}
             {onOpenDashboard && (
               <button
                 onClick={onOpenDashboard}
@@ -571,6 +582,15 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
               >
                 <FileText size={16} />
                 <span className="font-medium">我的文件</span>
+              </button>
+            )}
+            {onOpenAgentAssets && (
+              <button
+                onClick={onOpenAgentAssets}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-pc-text-secondary hover:text-pc-text hover:bg-[var(--pc-hover)] transition-colors w-full"
+              >
+                <Bot size={16} />
+                <span className="font-medium">智能体资产</span>
               </button>
             )}
             {onOpenTasks && (

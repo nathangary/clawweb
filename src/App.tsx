@@ -13,7 +13,9 @@ import { DashboardPage } from './components/Dashboard/DashboardPage';
 import { SkillHubPage } from './components/SkillHub/SkillHubPage';
 import { AgentOrchestratorPage } from './components/AgentOrchestrator/AgentOrchestratorPage';
 import { HistoryFilesPage } from './components/HistoryFiles/HistoryFilesPage';
+import { AgentAssetsPage } from './components/AgentAssets/AgentAssetsPage';
 import { TasksPage } from './components/Tasks/TasksPage';
+import { WorkspacePage } from './components/Workspace/WorkspacePage';
 import { sessionDisplayName, extractAgentIdFromKey, formatAgentId } from './lib/sessionName';
 import { X } from 'lucide-react';
 import { useT } from './hooks/useLocale';
@@ -35,7 +37,7 @@ function getSavedSplitRatio(): number {
 export default function App() {
   const {
     status, messages, sessions, activeSession, isGenerating, isLoadingHistory,
-    sendMessage, abort, switchSession, createNewSession,
+    sendMessage, abort, switchSession, createNewSession, deleteSession,
     authenticated, login, logout, connectError, isConnecting,
     getClient, getApiClient,
   } = useGateway();
@@ -46,7 +48,9 @@ export default function App() {
   const [skillHubOpen, setSkillHubOpen] = useState(false);
   const [agentOrchestratorOpen, setAgentOrchestratorOpen] = useState(false);
   const [historyFilesOpen, setHistoryFilesOpen] = useState(false);
+  const [agentAssetsOpen, setAgentAssetsOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const splitRatioRef = useRef(splitRatio);
   const secondary = useSecondarySession(getClient, splitSession);
@@ -90,7 +94,7 @@ export default function App() {
       const last = messages[messages.length - 1];
       if (last && last.role === 'assistant' && !last.isStreaming) {
         const preview = last.content?.slice(0, 100) || 'New message';
-        notify('伯俊智能舱', preview);
+        notify('伯俊俊马', preview);
       }
     }
   }, [messages, notify]);
@@ -114,6 +118,9 @@ export default function App() {
     if (e.key === 'Escape' && tasksOpen) {
       setTasksOpen(false);
     }
+    if (e.key === 'Escape' && workspaceOpen) {
+      setWorkspaceOpen(false);
+    }
     if (e.key === '?' && !shortcutsOpen) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
@@ -130,7 +137,7 @@ export default function App() {
         : (idx + 1) % sessions.length;
       switchSession(sessions[next].key);
     }
-  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen, skillHubOpen, tasksOpen]);
+  }, [sidebarOpen, shortcutsOpen, sessions, activeSession, switchSession, dashboardOpen, skillHubOpen, tasksOpen, workspaceOpen]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -155,13 +162,13 @@ export default function App() {
   return (
     <>
     <ToolCollapseProvider>
-    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="伯俊智能舱">
+    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="伯俊俊马">
       <a href="#chat-input" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-pc-accent focus:text-white focus:text-sm focus:font-medium">{t('app.skipToChat')}</a>
       <Sidebar
         sessions={sessions}
         activeSession={activeSession}
         onSwitch={switchSession}
-        onDelete={() => {}}
+        onDelete={deleteSession}
         onSplit={handleSplit}
         splitSession={splitSession}
         open={sidebarOpen}
@@ -173,7 +180,9 @@ export default function App() {
         onOpenSkillHub={() => setSkillHubOpen(true)}
         onOpenAgentOrchestrator={() => setAgentOrchestratorOpen(true)}
         onOpenHistoryFiles={() => setHistoryFilesOpen(true)}
+        onOpenAgentAssets={() => setAgentAssetsOpen(true)}
         onOpenTasks={() => setTasksOpen(true)}
+        onOpenWorkspace={() => setWorkspaceOpen(true)}
       />
       <div ref={splitContainerRef} className="flex-1 flex min-w-0" aria-hidden={sidebarOpen ? true : undefined}>
         <main className="flex flex-col min-w-0" style={splitSession ? { width: `${splitRatio}%` } : { flex: 1 }} aria-label={t('app.mainChat')}>
@@ -240,9 +249,19 @@ export default function App() {
         <HistoryFilesPage onClose={() => setHistoryFilesOpen(false)} apiClient={getApiClient()!} />
       </ErrorBoundary>
     )}
+    {agentAssetsOpen && getApiClient() && (
+      <ErrorBoundary>
+        <AgentAssetsPage onClose={() => setAgentAssetsOpen(false)} apiClient={getApiClient()!} />
+      </ErrorBoundary>
+    )}
     {tasksOpen && (
       <ErrorBoundary>
         <TasksPage apiClient={getApiClient()} onClose={() => setTasksOpen(false)} />
+      </ErrorBoundary>
+    )}
+    {workspaceOpen && (
+      <ErrorBoundary>
+        <WorkspacePage onClose={() => setWorkspaceOpen(false)} />
       </ErrorBoundary>
     )}
     </>

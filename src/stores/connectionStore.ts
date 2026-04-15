@@ -79,7 +79,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   wasConnected: false,
 
   connect: (url: string, token?: string, clientId?: string, eventHandler?: NanobotEventHandler) => {
-    if (!url || (!url.startsWith('ws://') && !url.startsWith('wss://'))) {
+    const isRelative = url.startsWith('/');
+    if (!url || (!isRelative && !url.startsWith('ws://') && !url.startsWith('wss://'))) {
       console.error('[Connection] Invalid URL:', url);
       return;
     }
@@ -91,7 +92,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     }
 
     const cid = clientId || 'webchat';
-    const apiUrl = import.meta.env.DEV ? '/api' : `http://${new URL(url).hostname}:18790/api`;
+    const apiUrl = '/api';
 
     let api = existingApi;
     if (!api) {

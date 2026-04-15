@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { playNotificationSound } from '../lib/notificationSound';
 
-const APP_NAME = '伯俊智能舱';
+const APP_NAME = '伯俊俊马';
 let baseTitle = APP_NAME;
 
 /** Update the base title (e.g. with active session name). Called by App. */

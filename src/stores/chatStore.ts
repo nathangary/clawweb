@@ -4,6 +4,7 @@ import type { NanobotOutboundEvent } from '../lib/nanobotGateway';
 import type { NanobotApiClient } from '../lib/nanobotApi';
 import { applyEventToMessages } from '../lib/messageHandler';
 import { mergeWithCache, setCachedMessages, getCachedMessages } from '../lib/messageCache';
+import { useConnectionStore } from './connectionStore';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -97,6 +98,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     set(patch);
+
+    if (isTerminalEvent) {
+      void (async () => {
+        const api = useConnectionStore.getState().getApiClient();
+        if (api) {
+          await state.loadSessions(api);
+        }
+      })();
+    }
   },
 
   loadHistory: async (sessionKey, api) => {
