@@ -55,7 +55,6 @@ export function LoginScreen({ onConnect, error, isConnecting }: Props) {
             <h1 className="text-2xl font-bold text-pc-text tracking-wide">{t('login.title')}</h1>
             <Sparkles className="h-5 w-5 text-pc-accent-light/60" />
           </div>
-          <p className="text-sm text-pc-text-muted">Connect to Nanobot Gateway</p>
         </div>
 
         <form onSubmit={handleSubmit} className={`rounded-2xl border border-pc-border bg-[var(--pc-bg-surface)]/80 backdrop-blur-xl p-6 ${HAS_URL_CONFIG ? 'space-y-5' : 'space-y-4'} shadow-2xl shadow-black/30`}>

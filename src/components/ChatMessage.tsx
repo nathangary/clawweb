@@ -108,7 +108,7 @@ function renderAttachmentBlocks(blocks: MessageBlock[]) {
             className="flex items-center gap-2 px-3 py-2 rounded-xl border border-pc-border bg-pc-elevated/50 hover:bg-pc-elevated/80 transition-colors text-sm text-pc-text no-underline"
           >
             <FileText size={16} className="text-orange-400 shrink-0" />
-            <span className="truncate max-w-[160px]">{f.fileName}</span>
+            <span className="truncate max-w-[160px]">{f.displayName || f.fileName}</span>
             <Download size={14} className="text-pc-text-muted shrink-0" />
           </a>
         );
@@ -540,7 +540,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
         }`}
         >
           {/* User-visible text */}
-          {!isUser ? (
+          {!isUser && (
             <CollapsibleContent content={message.content || ''} isStreaming={message.isStreaming}>
               {message.blocks.length > 0 ? renderTextBlocks(message.blocks) : (
                 <div className="markdown-body">
@@ -550,7 +550,9 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
                 </div>
               )}
             </CollapsibleContent>
-          ) : (
+          )}
+          {!isUser && renderAttachmentBlocks(message.blocks)}
+          {isUser && (
             message.blocks.length > 0 ? renderTextBlocks(message.blocks) : (
               <div className="markdown-body">
                 <LazyMarkdown components={markdownComponents}>
@@ -566,7 +568,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
           )}
 
           {message.multimodalResponse && extractDocuments(message.multimodalResponse).map((doc, i) => (
-            <DocumentPreview key={`doc-${i}`} assetId={doc.assetId} fileName={doc.fileName} mimeType={doc.mimeType} />
+            <DocumentPreview key={`doc-${i}`} assetId={doc.assetId} fileName={doc.fileName} displayName={doc.displayName} mimeType={doc.mimeType} />
           ))}
 
           {message.isStreaming && (() => {

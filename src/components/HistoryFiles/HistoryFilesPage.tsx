@@ -358,7 +358,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
                         {categoryIcon(asset.category)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm text-pc-text font-medium truncate">{asset.name}</div>
+                        <div className="text-sm text-pc-text font-medium truncate">{asset.display_name || asset.name}</div>
                         <div className="flex items-center gap-2 mt-1 text-[10px] text-pc-text-muted">
                           <span className="flex items-center gap-0.5">
                             <Clock size={10} />
@@ -393,7 +393,7 @@ export function HistoryFilesPage({ onClose, apiClient }: Props) {
               <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${categoryColor(selectedFile.category)}`}>
                 {categoryIcon(selectedFile.category, 14)}
               </div>
-              <span className="text-sm font-medium text-pc-text truncate">{selectedFile.name}</span>
+              <span className="text-sm font-medium text-pc-text truncate">{selectedFile.display_name || selectedFile.name}</span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <button

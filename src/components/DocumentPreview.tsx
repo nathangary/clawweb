@@ -6,6 +6,7 @@ import { LazyMarkdown } from './LazyMarkdown';
 interface DocumentPreviewProps {
   assetId: string;
   fileName: string;
+  displayName?: string;
   mimeType?: string;
   fullHeight?: boolean;
 }
@@ -67,7 +68,7 @@ function getDownloadUrl(assetId: string): string {
   return `${baseUrl}/api/v1/admin/assets/${encodeURIComponent(assetId)}/download`;
 }
 
-export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = false }: DocumentPreviewProps) {
+export function DocumentPreview({ assetId, fileName, displayName, mimeType, fullHeight = false }: DocumentPreviewProps) {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [htmlSrc, setHtmlSrc] = useState<string | null>(null);
   const [pdfSrc, setPdfSrc] = useState<string | null>(null);
@@ -189,7 +190,7 @@ export function DocumentPreview({ assetId, fileName, mimeType, fullHeight = fals
       <div className="flex items-center gap-2">
         {getFileIcon(fileType)}
         <span className="text-xs text-pc-text-muted">{getFileLabel(fileType)}</span>
-        <span className="text-xs text-pc-text-faint truncate max-w-[200px]">{fileName}</span>
+        <span className="text-xs text-pc-text-faint truncate max-w-[200px]">{displayName || fileName}</span>
       </div>
       <div className="flex items-center gap-1">
         <button
@@ -336,10 +337,11 @@ export interface DocumentInfo {
   assetId: string;
   url?: string;
   fileName: string;
+  displayName?: string;
   mimeType?: string;
 }
 
-export function extractDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): DocumentInfo[] {
+export function extractDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string; display_name?: string }> }): DocumentInfo[] {
   if (!multimodalResponse?.media) return [];
   
   return multimodalResponse.media
@@ -348,11 +350,12 @@ export function extractDocuments(multimodalResponse: { media?: Array<{ type?: st
       assetId: m.asset_id!,
       url: m.url,
       fileName: m.url ? m.url.split('/').pop() || 'document' : 'document',
+      displayName: m.display_name,
       mimeType: m.mime_type,
     }));
 }
 
-export function extractImages(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): DocumentInfo[] {
+export function extractImages(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string; display_name?: string }> }): DocumentInfo[] {
   if (!multimodalResponse?.media) return [];
   
   return multimodalResponse.media
@@ -361,6 +364,7 @@ export function extractImages(multimodalResponse: { media?: Array<{ type?: strin
       assetId: m.asset_id!,
       url: m.url,
       fileName: m.url ? m.url.split('/').pop() || 'image' : 'image',
+      displayName: m.display_name,
       mimeType: m.mime_type,
     }));
 }
@@ -388,10 +392,11 @@ export interface HtmlDocumentInfo {
   assetId: string;
   url?: string;
   fileName: string;
+  displayName?: string;
   mimeType?: string;
 }
 
-export function extractHtmlDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): HtmlDocumentInfo[] {
+export function extractHtmlDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string; display_name?: string }> }): HtmlDocumentInfo[] {
   if (!multimodalResponse?.media) return [];
   
   return multimodalResponse.media
@@ -400,11 +405,12 @@ export function extractHtmlDocuments(multimodalResponse: { media?: Array<{ type?
       assetId: m.asset_id!,
       url: m.url,
       fileName: m.url ? m.url.split('/').pop() || 'document.html' : 'document.html',
+      displayName: m.display_name,
       mimeType: m.mime_type,
     }));
 }
 
-export function extractJsonDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string }> }): HtmlDocumentInfo[] {
+export function extractJsonDocuments(multimodalResponse: { media?: Array<{ type?: string; source?: string; url?: string; asset_id?: string; mime_type?: string; display_name?: string }> }): HtmlDocumentInfo[] {
   if (!multimodalResponse?.media) return [];
   
   return multimodalResponse.media
@@ -413,6 +419,7 @@ export function extractJsonDocuments(multimodalResponse: { media?: Array<{ type?
       assetId: m.asset_id!,
       url: m.url,
       fileName: m.url ? m.url.split('/').pop() || 'data.json' : 'data.json',
+      displayName: m.display_name,
       mimeType: m.mime_type,
     }));
 }

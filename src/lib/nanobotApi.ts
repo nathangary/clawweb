@@ -169,6 +169,7 @@ export interface AssetCategory {
 export interface AssetItem {
   id: string;
   name: string;
+  display_name?: string;
   original_name?: string;
   category: string;
   scene?: string;
