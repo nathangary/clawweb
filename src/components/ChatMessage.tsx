@@ -193,15 +193,37 @@ function renderTextBlocks(blocks: MessageBlock[]) {
 function renderInternalBlocks(blocks: MessageBlock[]) {
   const elements: React.ReactElement[] = [];
   const internals = getInternalBlocks(blocks);
+  const usedResults = new Set<number>();
+
+  const findResultFor = (toolUseId: string | undefined, startIdx: number): { content: string; idx: number } | undefined => {
+    if (toolUseId) {
+      for (let j = startIdx + 1; j < internals.length; j++) {
+        const b = internals[j];
+        if (b.type === 'tool_result' && !usedResults.has(j) && b.toolUseId === toolUseId) {
+          return { content: b.content, idx: j };
+        }
+      }
+    }
+    const next = internals[startIdx + 1];
+    if (next?.type === 'tool_result' && !usedResults.has(startIdx + 1)) {
+      return { content: next.content, idx: startIdx + 1 };
+    }
+    return undefined;
+  };
+
   for (let i = 0; i < internals.length; i++) {
+    if (usedResults.has(i)) continue;
     const block = internals[i];
     if (block.type === 'thinking') {
       elements.push(<ThinkingBlock key={`int-${i}`} text={block.text} />);
     } else if (block.type === 'tool_use') {
-      const nextBlock = internals[i + 1];
-      const result = nextBlock?.type === 'tool_result' ? nextBlock.content : undefined;
-      elements.push(<ToolCall key={`int-${i}`} name={block.name} input={block.input} result={result} />);
-      if (result !== undefined) i++;
+      const matched = findResultFor(block.id, i);
+      if (matched) {
+        usedResults.add(matched.idx);
+        elements.push(<ToolCall key={`int-${i}`} name={block.name} input={block.input} result={matched.content} />);
+      } else {
+        elements.push(<ToolCall key={`int-${i}`} name={block.name} input={block.input} />);
+      }
     } else if (block.type === 'tool_result') {
       elements.push(<ToolCall key={`int-${i}`} name={block.name || 'tool'} result={block.content} />);
     }
@@ -383,14 +405,18 @@ function SystemEventMessage({ message }: { message: ChatMessageType }) {
   );
 }
 
+const everRendered = new Set<string>();
+
 export const ChatMessageComponent = memo(function ChatMessageComponent({ message: rawMessage, onRetry, onReply, onUseSelection, agentAvatarUrl, isFirstInGroup = true, isBookmarked = false, onToggleBookmark }: { message: ChatMessageType; onRetry?: (text: string) => void; onReply?: (preview: string) => void; onUseSelection?: (text: string) => void; agentAvatarUrl?: string; isFirstInGroup?: boolean; isBookmarked?: boolean; onToggleBookmark?: () => void }) {
-  useLocale(); // re-render on locale change
+  useLocale();
   const { resolvedTheme } = useTheme();
   const isLight = resolvedTheme === 'light';
   const [showRawJson, setShowRawJson] = useState(false);
   const [selectionAction, setSelectionAction] = useState<SelectionActionState | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const selectionButtonRef = useRef<HTMLButtonElement>(null);
+  const isNew = !everRendered.has(rawMessage.id);
+  if (isNew) everRendered.add(rawMessage.id);
 
   // Strip webhook/hook scaffolding and webchat envelope from user messages before rendering
   const message = useMemo(() => {
@@ -509,7 +535,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
   }
 
   return (
-    <div className={`animate-fade-in flex gap-3 px-4 ${isFirstInGroup ? 'py-2' : 'py-0.5'} ${isUser ? 'flex-row-reverse' : ''} ${message.sendStatus === 'sending' ? 'opacity-70' : ''} ${message.sendStatus === 'error' ? 'opacity-60' : ''}`}>
+    <div className={`${isNew ? 'animate-fade-in' : ''} flex gap-3 px-4 ${isFirstInGroup ? 'py-2' : 'py-0.5'} ${isUser ? 'flex-row-reverse' : ''} ${message.sendStatus === 'sending' ? 'opacity-70' : ''} ${message.sendStatus === 'error' ? 'opacity-60' : ''}`}>
       {/* Avatar — hidden for grouped messages, but keep width for alignment */}
       <div className={`shrink-0 mt-1 flex h-9 w-9 items-center justify-center rounded-2xl overflow-hidden ${isFirstInGroup ? 'border border-pc-border bg-pc-elevated/40' : ''}`}>
         {isFirstInGroup ? (

@@ -1,15 +1,16 @@
-import { useState, memo } from 'react';
+import { memo } from 'react';
 import { ChevronRight, ChevronDown, Brain } from 'lucide-react';
 import { useT } from '../hooks/useLocale';
+import { usePersistedOpen } from '../hooks/usePersistedOpen';
 
 export const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, toggleOpen] = usePersistedOpen(`thinking-${text.slice(0, 40)}`);
 
   return (
     <div className="my-2">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         aria-expanded={open}
         aria-label={t('thinking.label')}
         className="inline-flex items-center gap-1.5 rounded-2xl border border-pc-border bg-pc-elevated/35 px-3 py-1.5 text-xs text-violet-300 hover:bg-[var(--pc-hover)] transition-colors"

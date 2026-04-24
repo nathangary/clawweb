@@ -6,6 +6,7 @@ import { useT } from '../hooks/useLocale';
 import { useTheme } from '../hooks/useTheme';
 import { ImageBlock } from './ImageBlock';
 import { useToolCollapse } from '../hooks/useToolCollapse';
+import { usePersistedOpen } from '../hooks/usePersistedOpen';
 
 type ToolColor = { border: string; bg: string; text: string; icon: string; glow: string; expandBorder: string; expandBg: string };
 
@@ -271,21 +272,21 @@ function extractImageFromResult(result: string): { src: string; remaining: strin
 
 export const ToolCall = memo(function ToolCall({ name, input, result }: { name: string; input?: Record<string, unknown>; result?: string }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const hintKey = input ? `${name}-${JSON.stringify(input).slice(0, 60)}` : name;
+  const [open, toggleOpen, setOpen] = usePersistedOpen(`tool-${hintKey}`);
   const [wrap, setWrap] = useState(true);
   const { globalState, version } = useToolCollapse();
   const { resolvedTheme } = useTheme();
   const lastVersion = useRef(version);
   const cs = getColorStyles(name, resolvedTheme === 'light');
 
-  // Respond to global collapse/expand commands
   useEffect(() => {
     if (version !== lastVersion.current) {
       lastVersion.current = version;
-      if (globalState === 'collapse-all') setOpen(false); // eslint-disable-line react-hooks/set-state-in-effect -- intentional: sync with global toggle
+      if (globalState === 'collapse-all') setOpen(false);
       else if (globalState === 'expand-all') setOpen(true);
     }
-  }, [globalState, version]);
+  }, [globalState, version, setOpen]);
 
   const inputStr = input ? (typeof input === 'string' ? input : JSON.stringify(input, null, 2)) : '';
   const hint = getContextHint(name, input);
@@ -294,7 +295,7 @@ export const ToolCall = memo(function ToolCall({ name, input, result }: { name: 
     <div className="my-2">
       {/* Tool use badge */}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         className={`inline-flex items-center gap-1.5 rounded-2xl border px-3 py-1.5 text-xs hover:brightness-125 transition-all max-w-full ${cs.glow}`}
         style={{ ...cs.badge, ...cs.text }}
         aria-expanded={open}

@@ -107,11 +107,15 @@ export function Chat({ messages, isGenerating, isLoadingHistory, status, session
     estimateSize: (index) => {
       const { msg } = visibleMessages[index];
       if (msg.isCompactionSeparator) return 48;
+      if (msg.isSystemEvent) return 40;
+      const isInternalOnly = msg.role === 'assistant' && msg.blocks.length > 0 && !msg.blocks.some(b => b.type === 'text' && b.text.trim()) && !msg.blocks.some(b => b.type === 'image');
+      if (isInternalOnly) return 44;
       const textLen = (msg.content || '').length;
-      if (textLen < 100) return 80;
-      if (textLen < 500) return 140;
-      if (textLen < 2000) return 240;
-      return 400;
+      const toolCount = msg.blocks.filter(b => b.type === 'tool_use' || b.type === 'tool_result').length;
+      if (textLen < 100) return 80 + toolCount * 36;
+      if (textLen < 500) return 140 + toolCount * 36;
+      if (textLen < 2000) return 240 + toolCount * 36;
+      return 400 + toolCount * 36;
     },
     overscan: 5,
     measureElement: (el) => el?.getBoundingClientRect().height ?? 40,
