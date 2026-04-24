@@ -413,7 +413,7 @@ export function Sidebar({ sessions, activeSession, onSwitch, onDelete, onSplit, 
             <div className="relative shrink-0">
               <div className="absolute -inset-1.5 rounded-xl bg-gradient-to-r from-cyan-400/15 to-violet-500/15 blur-lg" />
               {/* <div className="relative flex h-8 w-8 items-center justify-center rounded-xl overflow-hidden"> */}
-                {/* <img src="/logo.png" alt="伯俊俊马" className="h-8 w-8 object-contain" /> */}
+                {/* <img src="/logo.png" alt="伯俊Claw" className="h-8 w-8 object-contain" /> */}
               {/* </div> */}
             </div>
             <span className="font-semibold text-sm text-pc-text tracking-wide truncate">{t('sidebar.title')}</span>

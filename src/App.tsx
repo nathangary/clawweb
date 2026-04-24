@@ -94,7 +94,7 @@ export default function App() {
       const last = messages[messages.length - 1];
       if (last && last.role === 'assistant' && !last.isStreaming) {
         const preview = last.content?.slice(0, 100) || 'New message';
-        notify('伯俊俊马', preview);
+        notify('伯俊Claw', preview);
       }
     }
   }, [messages, notify]);
@@ -162,7 +162,7 @@ export default function App() {
   return (
     <>
     <ToolCollapseProvider>
-    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="伯俊俊马">
+    <div className="h-dvh flex overflow-x-hidden bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]" role="application" aria-label="伯俊Claw">
       <a href="#chat-input" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-pc-accent focus:text-white focus:text-sm focus:font-medium">{t('app.skipToChat')}</a>
       <Sidebar
         sessions={sessions}

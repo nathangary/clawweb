@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from 'react';
 import { ChevronRight, ChevronDown, Check, Copy, WrapText, AlignLeft } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { copyToClipboard } from '../lib/clipboard';
 import { useT } from '../hooks/useLocale';
 import { useTheme } from '../hooks/useTheme';
@@ -192,7 +193,7 @@ export function HighlightedPre({ text, className, wrap }: { text: string; classN
   if (highlighted) {
     return (
       <pre className={`${className} ${wrapClass}`}>
-        <code className="hljs" dangerouslySetInnerHTML={{ __html: highlighted }} />
+        <code className="hljs" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlighted) }} />
       </pre>
     );
   }

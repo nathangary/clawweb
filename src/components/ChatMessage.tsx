@@ -340,6 +340,7 @@ interface SelectionActionState {
   text: string;
   top: number;
   left: number;
+  msgId: string;
 }
 
 /** Extract plain text from message blocks for clipboard copy */
@@ -434,11 +435,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
 
   const isUser = message.role === 'user';
 
-  const clearSelectionAction = useCallback(() => {
-    setSelectionAction(null);
-  }, []);
-
-  const updateSelectionAction = useCallback(() => {
+  const updateSelection = useCallback(() => {
     if (isUser || message.isStreaming || !onUseSelection) {
       setSelectionAction(null);
       return;
@@ -474,28 +471,27 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
       text,
       top: Math.max(12, rect.top - 40),
       left: rect.left + (rect.width / 2),
+      msgId: message.id,
     });
-  }, [isUser, message.isStreaming, onUseSelection]);
+  }, [isUser, message.isStreaming, onUseSelection, message.id]);
 
   useEffect(() => {
     if (!onUseSelection || isUser) return;
-
     const handleSelectionChange = () => {
-      requestAnimationFrame(updateSelectionAction);
+      requestAnimationFrame(updateSelection);
     };
     const handlePointerDown = (e: MouseEvent) => {
       if (selectionButtonRef.current?.contains(e.target as Node)) return;
       if (bubbleRef.current?.contains(e.target as Node)) return;
-      clearSelectionAction();
+      setSelectionAction(null);
     };
-
     document.addEventListener('selectionchange', handleSelectionChange);
     document.addEventListener('mousedown', handlePointerDown);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
       document.removeEventListener('mousedown', handlePointerDown);
     };
-  }, [clearSelectionAction, isUser, onUseSelection, updateSelectionAction]);
+  }, [isUser, onUseSelection, updateSelection]);
 
   // System events render as subtle inline notifications
   if (message.isSystemEvent) {
@@ -529,8 +525,8 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
       <div className={`min-w-0 max-w-[80%] ${isUser ? 'text-right' : ''}`}>
         <div
           ref={bubbleRef}
-          onMouseUp={updateSelectionAction}
-          onKeyUp={updateSelectionAction}
+          onMouseUp={updateSelection}
+          onKeyUp={updateSelection}
           className={`group relative inline-block text-left rounded-3xl px-4 py-3 text-sm leading-relaxed max-w-full overflow-hidden ${
           isUser
             ? (isLight
@@ -649,7 +645,7 @@ export const ChatMessageComponent = memo(function ChatMessageComponent({ message
               e.stopPropagation();
               onUseSelection(selectionAction.text);
               window.getSelection()?.removeAllRanges();
-              clearSelectionAction();
+              setSelectionAction(null);
             }}
             className="fixed z-[9999] -translate-x-1/2 inline-flex items-center gap-2 rounded-2xl border border-white/8 bg-[rgba(26,26,29,0.96)] px-3.5 py-2 text-[13px] font-medium text-white shadow-[0_12px_28px_rgba(0,0,0,0.38)] backdrop-blur-xl transition-all hover:bg-[rgba(36,36,40,0.98)]"
             style={{ top: selectionAction.top, left: selectionAction.left }}

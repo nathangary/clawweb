@@ -50,7 +50,7 @@ export function LoginScreen({ onConnect, error, isConnecting }: Props) {
     <div className="h-dvh flex items-center justify-center bg-[var(--pc-bg-base)] text-pc-text bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.02),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(99,102,241,0.04),transparent_50%)]">
       <div className="w-full max-w-md mx-4">
         <div className="flex flex-col items-center gap-3 mb-8">
-          <img src="/logo.png" alt="伯俊俊马" className="h-20 w-20 drop-shadow-lg" />
+          <img src="/logo.png" alt="伯俊Claw" className="h-20 w-20 drop-shadow-lg" />
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-pc-text tracking-wide">{t('login.title')}</h1>
             <Sparkles className="h-5 w-5 text-pc-accent-light/60" />
