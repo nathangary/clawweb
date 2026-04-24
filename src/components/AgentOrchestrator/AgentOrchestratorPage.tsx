@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Plus, Clock, ChevronRight, GitBranch, ArrowRight, Trash2, Edit3, Play, Bot, Zap, GitFork, Loader2, Search, Activity, CheckCircle, Power, PowerOff } from 'lucide-react';
-import type { NanobotGatewayClient, NanobotOutboundEvent } from '../../lib/nanobotGateway';
+import type { NanobotGatewayClient } from '../../lib/nanobotGateway';
 import type { NanobotApiClient } from '../../lib/nanobotApi';
 import { loadRules, deleteRule, generateRuleId, invalidateRulesCache, updateRuleStatus, type Rule, type FlowNode, type FlowGraph } from '../../lib/rules';
 import { ToastContainer, type Toast } from '../Toast';
@@ -12,14 +12,7 @@ import { ToolCall } from '../ToolCall';
 import { DocumentPreview, extractDocuments, extractImages, extractJsonDocuments, fetchJsonAsset, type DocumentInfo } from '../DocumentPreview';
 import { ImageBlock } from '../ImageBlock';
 import { FlowGraphView } from './FlowGraphView';
-
-interface GenerationMessage {
-  id: string;
-  type: 'progress' | 'tool_use' | 'tool_result' | 'thinking' | 'text' | 'final';
-  content: string;
-  name?: string;
-  input?: Record<string, unknown>;
-}
+import { useAgentEventStream, type StreamMessage } from '../../hooks/useAgentEventStream';
 
 const RULE_SYSTEM_PROMPT = `请用agent-builder技能帮我生成流程规则`;
 
@@ -47,12 +40,10 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [showActivate, setShowActivate] = useState(false);
   const [activatingRule, setActivatingRule] = useState<Rule | null>(null);
   const [isActivating, setIsActivating] = useState(false);
-  const [activateMessages, setActivateMessages] = useState<GenerationMessage[]>([]);
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [rulesError, setRulesError] = useState<string | null>(null);
-  const [genMessages, setGenMessages] = useState<GenerationMessage[]>([]);
   const [monitorStats, setMonitorStats] = useState<MonitorStats | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,13 +51,15 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   const [showTestRun, setShowTestRun] = useState(false);
   const [testRunRule, setTestRunRule] = useState<Rule | null>(null);
   const [isTestRunning, setIsTestRunning] = useState(false);
-  const [testRunMessages, setTestRunMessages] = useState<GenerationMessage[]>([]);
   const [testRunReport, setTestRunReport] = useState<string | null>(null);
   const [testRunDocs, setTestRunDocs] = useState<DocumentInfo[]>([]);
   const [testRunImages, setTestRunImages] = useState<DocumentInfo[]>([]);
-  const [editMessages, setEditMessages] = useState<GenerationMessage[]>([]);
   const [editPanelVisible, setEditPanelVisible] = useState(false);
-  const eventHandlerRef = useRef<(() => void) | null>(null);
+
+  const genStream = useAgentEventStream();
+  const activateStream = useAgentEventStream();
+  const testStream = useAgentEventStream();
+  const editStream = useAgentEventStream();
 
   const dismissToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -122,33 +115,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
     fetchMonitorStats();
   }, [fetchRules, fetchMonitorStats]);
 
-  useEffect(() => {
-    return () => {
-      if (eventHandlerRef.current) {
-        eventHandlerRef.current();
-      }
-    };
-  }, []);
-
-  const extractToolInfo = (toolHint: string): { name: string; args: Record<string, unknown> } | null => {
-    try {
-      const match = toolHint.match(/^(\w+)\s*\(([\s\S]*)\)$/);
-      if (match) {
-        const name = match[1];
-        let args: Record<string, unknown> = {};
-        if (match[2].trim()) {
-          try {
-            args = JSON.parse(match[2].replace(/([a-zA-Z0-9_]+):/g, '"$1":'));
-          } catch {
-            args = { _raw: match[2] };
-          }
-        }
-        return { name, args };
-      }
-    } catch {}
-    return null;
-  };
-
   const handleGenerateRule = async (attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => {
     if (!description.trim() && (!attachments || attachments.length === 0)) return;
     const client = getClient();
@@ -157,12 +123,171 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       return;
     }
 
-    client.setChatId(`agentloop-${Date.now()}`);
-
     setIsGenerating(true);
-    setGenMessages([]);
+    genStream.clearMessages();
     const fullMessage = `${RULE_SYSTEM_PROMPT}\n\n需求如下：${description || '(见图片)'}`;
-    client.send(fullMessage, attachments, {
+
+    genStream.startStream(client, fullMessage, attachments, async (event) => {
+      try {
+        let jsonStr = (event.content || '').trim();
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim();
+        } else {
+          const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
+          if (braceMatch) {
+            jsonStr = braceMatch[0];
+          }
+        }
+        let parsed: any;
+        try {
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          const multimodal = event.multimodalResponse || event.multimodal_response;
+          if (multimodal?.content) {
+            jsonStr = multimodal.content.trim();
+            const mmCodeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+            if (mmCodeBlockMatch) {
+              jsonStr = mmCodeBlockMatch[1].trim();
+            } else {
+              const mmBraceMatch = jsonStr.match(/\{[\s\S]*\}/);
+              if (mmBraceMatch) {
+                jsonStr = mmBraceMatch[0];
+              }
+            }
+            try {
+              parsed = JSON.parse(jsonStr);
+            } catch {
+              const jsonDocs = extractJsonDocuments(multimodal);
+              if (jsonDocs.length > 0) {
+                const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+                if (jsonData) {
+                  parsed = jsonData as any;
+                } else {
+                  throw new Error('Failed to fetch JSON asset');
+                }
+              } else {
+                throw new Error('No valid JSON found in content or multimodalResponse');
+              }
+            }
+          } else {
+            const jsonDocs = extractJsonDocuments(multimodal || {});
+            if (jsonDocs.length > 0) {
+              const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
+              if (jsonData) {
+                parsed = jsonData as any;
+              } else {
+                throw new Error('Failed to fetch JSON asset');
+              }
+            } else {
+              throw new Error('No valid JSON found in content or multimodalResponse');
+            }
+          }
+        }
+        const ruleData = parsed.rule || parsed;
+        
+        const rawNodes = ruleData.flow?.nodes || [];
+        const rawEdges = ruleData.flow?.edges || [];
+
+        const normalizeNodes = (nodes: any[]): any[] => {
+          return nodes.map(node => {
+            const skillRef = ruleData.skills?.find((s: any) => s.skillId === node.skillId);
+            return {
+              id: node.id || `node-${Math.random().toString(36).slice(2, 8)}`,
+              type: node.type === 'trigger' ? 'start' :
+                    node.type === 'end' ? 'end' :
+                    node.type === 'condition' ? 'condition' :
+                    node.type === 'action' ? 'skill' : node.type,
+              label: node.label || node.name || skillRef?.name || '未命名',
+              skillId: node.skillId,
+              skillName: skillRef?.name || node.skillName || '',
+              index: node.index,
+              condition: node.expression || node.condition,
+              input: node.input,
+              output: node.output,
+            };
+          });
+        };
+
+        const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
+          const validEdges = edges.filter(e => (e.from && e.to) || (e.source && e.target));
+          if (validEdges.length === 0 && normalizedNodes.length > 1) {
+            const result: any[] = [];
+            for (let i = 0; i < normalizedNodes.length - 1; i++) {
+              result.push({
+                id: `e-${normalizedNodes[i].id}-${normalizedNodes[i + 1].id}`,
+                source: normalizedNodes[i].id,
+                target: normalizedNodes[i + 1].id,
+                label: '',
+              });
+            }
+            return result;
+          }
+          return validEdges.map(edge => {
+            const src = edge.from || edge.source;
+            const tgt = edge.to || edge.target;
+            let label = edge.label || '';
+            if (!label && edge.condition) {
+              label = edge.condition === 'true' ? '是' : edge.condition === 'false' ? '否' : edge.condition;
+            }
+            return {
+              id: edge.id || `e-${src}-${tgt}`,
+              source: src,
+              target: tgt,
+              label,
+            };
+          });
+        };
+
+        const normalizedNodes = normalizeNodes(rawNodes);
+        const normalizedEdges = normalizeEdges(rawEdges, normalizedNodes);
+        
+        const normalizeTriggerType = (t: string): 'manual' | 'cron' | 'webhook' => {
+          if (t === 'cron' || t === 'schedule' || t === 'timed') return 'cron';
+          if (t === 'webhook' || t === 'event') return 'webhook';
+          return 'manual';
+        };
+
+        const newRule: Rule = {
+          id: generateRuleId(),
+          name: ruleData.name || '未命名规则',
+          displayName: ruleData.displayName || ruleData.display_name || undefined,
+          description: ruleData.description || description,
+          status: 'draft',
+          triggerType: normalizeTriggerType(ruleData.triggerType),
+          triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig),
+          variables: ruleData.variables || {},
+          runCount: 0,
+          successRate: 0,
+          createdAt: new Date().toISOString(),
+          skills: ruleData.skills || [],
+          flow: {
+            nodes: normalizedNodes,
+            edges: normalizedEdges,
+          },
+          flowType: 'graph',
+          systemPrompt: parsed.systemPrompt || '',
+        };
+        invalidateRulesCache();
+        const latestRules = await loadRules();
+        setRules(latestRules);
+        setDescription('');
+        setShowCreate(false);
+        const createdRule = latestRules.find(r => r.name === newRule.name) || newRule;
+        showToast('success', `智能体「${createdRule.displayName || createdRule.name}」已创建成功`, 4000);
+        setSelectedRule(createdRule);
+      } catch (e) {
+        console.error('解析规则失败:', e);
+        showToast('error', '智能体生成失败，请重试');
+      } finally {
+        setIsGenerating(false);
+        genStream.clearMessages();
+      }
+    }, () => {
+      setIsGenerating(false);
+      genStream.clearMessages();
+      showToast('error', '生成智能体时出错');
+    }, {
       session_params: {
         context_policy: {
           enabled: true,
@@ -170,234 +295,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         }
       }
     });
-
-    let handled = false;
-
-    const handleRuleEvent = (event: NanobotOutboundEvent) => {
-      if (handled) return;
-      
-      if (event.eventType === 'progress') {
-        const text = event.content;
-        const toolHint = event.metadata?._tool_hint;
-        const thinking = event.metadata?._thinking as string | undefined;
-
-        setGenMessages(prev => {
-          const msgs = [...prev];
-
-          if (thinking) {
-            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
-            if (thinkIdx >= 0) {
-              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
-            } else {
-              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
-            }
-          }
-          if (toolHint && typeof toolHint === 'string') {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              const existingToolIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingToolIdx < 0) {
-                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
-              }
-            }
-          }
-          if (text) {
-            const textTarget = msgs[msgs.length - 1];
-            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
-              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
-            } else {
-              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
-            }
-          }
-          return msgs;
-        });
-        client.ack(event.eventId);
-      } else if (event.eventType === 'tool_hint') {
-        const toolContent = event.content;
-        if (toolContent) {
-          const toolInfo = extractToolInfo(toolContent);
-          if (toolInfo) {
-            setGenMessages(prev => {
-              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
-              }
-              return prev;
-            });
-          }
-        }
-        client.ack(event.eventId);
-      } else if (event.eventType === 'final' && event.content) {
-        handled = true;
-        client.ack(event.eventId);
-        (async () => {
-          try {
-            let jsonStr = event.content.trim();
-            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-            if (codeBlockMatch) {
-              jsonStr = codeBlockMatch[1].trim();
-            } else {
-              const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
-              if (braceMatch) {
-                jsonStr = braceMatch[0];
-              }
-            }
-            let parsed: any;
-            try {
-              parsed = JSON.parse(jsonStr);
-            } catch {
-              const multimodal = event.multimodalResponse || event.multimodal_response;
-              if (multimodal?.content) {
-                jsonStr = multimodal.content.trim();
-                const mmCodeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-                if (mmCodeBlockMatch) {
-                  jsonStr = mmCodeBlockMatch[1].trim();
-                } else {
-                  const mmBraceMatch = jsonStr.match(/\{[\s\S]*\}/);
-                  if (mmBraceMatch) {
-                    jsonStr = mmBraceMatch[0];
-                  }
-                }
-                try {
-                  parsed = JSON.parse(jsonStr);
-                } catch {
-                  const jsonDocs = extractJsonDocuments(multimodal);
-                  if (jsonDocs.length > 0) {
-                    const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
-                    if (jsonData) {
-                      parsed = jsonData as any;
-                    } else {
-                      throw new Error('Failed to fetch JSON asset');
-                    }
-                  } else {
-                    throw new Error('No valid JSON found in content or multimodalResponse');
-                  }
-                }
-              } else {
-                const jsonDocs = extractJsonDocuments(multimodal || {});
-                if (jsonDocs.length > 0) {
-                  const jsonData = await fetchJsonAsset(jsonDocs[0].assetId);
-                  if (jsonData) {
-                    parsed = jsonData as any;
-                  } else {
-                    throw new Error('Failed to fetch JSON asset');
-                  }
-                } else {
-                  throw new Error('No valid JSON found in content or multimodalResponse');
-                }
-              }
-            }
-            const ruleData = parsed.rule || parsed;
-            
-            const rawNodes = ruleData.flow?.nodes || [];
-            const rawEdges = ruleData.flow?.edges || [];
-
-            const normalizeNodes = (nodes: any[]): any[] => {
-              return nodes.map(node => {
-                const skillRef = ruleData.skills?.find((s: any) => s.skillId === node.skillId);
-                return {
-                  id: node.id || `node-${Math.random().toString(36).slice(2, 8)}`,
-                  type: node.type === 'trigger' ? 'start' :
-                        node.type === 'end' ? 'end' :
-                        node.type === 'condition' ? 'condition' :
-                        node.type === 'action' ? 'skill' : node.type,
-                  label: node.label || node.name || skillRef?.name || '未命名',
-                  skillId: node.skillId,
-                  skillName: skillRef?.name || node.skillName || '',
-                  index: node.index,
-                  condition: node.expression || node.condition,
-                  input: node.input,
-                  output: node.output,
-                };
-              });
-            };
-
-            const normalizeEdges = (edges: any[], normalizedNodes: any[]): any[] => {
-              const validEdges = edges.filter(e => (e.from && e.to) || (e.source && e.target));
-              if (validEdges.length === 0 && normalizedNodes.length > 1) {
-                const result: any[] = [];
-                for (let i = 0; i < normalizedNodes.length - 1; i++) {
-                  result.push({
-                    id: `e-${normalizedNodes[i].id}-${normalizedNodes[i + 1].id}`,
-                    source: normalizedNodes[i].id,
-                    target: normalizedNodes[i + 1].id,
-                    label: '',
-                  });
-                }
-                return result;
-              }
-              return validEdges.map(edge => {
-                const src = edge.from || edge.source;
-                const tgt = edge.to || edge.target;
-                let label = edge.label || '';
-                if (!label && edge.condition) {
-                  label = edge.condition === 'true' ? '是' : edge.condition === 'false' ? '否' : edge.condition;
-                }
-                return {
-                  id: edge.id || `e-${src}-${tgt}`,
-                  source: src,
-                  target: tgt,
-                  label,
-                };
-              });
-            };
-
-            const normalizedNodes = normalizeNodes(rawNodes);
-            const normalizedEdges = normalizeEdges(rawEdges, normalizedNodes);
-            
-            const normalizeTriggerType = (t: string): 'manual' | 'cron' | 'webhook' => {
-              if (t === 'cron' || t === 'schedule' || t === 'timed') return 'cron';
-              if (t === 'webhook' || t === 'event') return 'webhook';
-              return 'manual';
-            };
-
-            const newRule: Rule = {
-              id: generateRuleId(),
-              name: ruleData.name || '未命名规则',
-              displayName: ruleData.displayName || ruleData.display_name || undefined,
-              description: ruleData.description || description,
-              status: 'draft',
-              triggerType: normalizeTriggerType(ruleData.triggerType),
-              triggerConfig: typeof ruleData.triggerConfig === 'string' ? ruleData.triggerConfig : JSON.stringify(ruleData.triggerConfig),
-              variables: ruleData.variables || {},
-              runCount: 0,
-              successRate: 0,
-              createdAt: new Date().toISOString(),
-              skills: ruleData.skills || [],
-              flow: {
-                nodes: normalizedNodes,
-                edges: normalizedEdges,
-              },
-              flowType: 'graph',
-              systemPrompt: parsed.systemPrompt || '',
-            };
-            invalidateRulesCache();
-            const latestRules = await loadRules();
-            setRules(latestRules);
-            setDescription('');
-            setShowCreate(false);
-            const createdRule = latestRules.find(r => r.name === newRule.name) || newRule;
-            showToast('success', `智能体「${createdRule.displayName || createdRule.name}」已创建成功`, 4000);
-            setSelectedRule(createdRule);
-          } catch (e) {
-            console.error('解析规则失败:', e);
-            showToast('error', '智能体生成失败，请重试');
-          } finally {
-            setIsGenerating(false);
-            setGenMessages([]);
-          }
-        })();
-      } else if (event.eventType === 'error') {
-        handled = true;
-        setIsGenerating(false);
-        setGenMessages([]);
-        showToast('error', '生成智能体时出错');
-      }
-    };
-
-    const unsubscribe = client.onEvent(handleRuleEvent);
-    eventHandlerRef.current?.();
-    eventHandlerRef.current = unsubscribe;
   };
 
   const handleActivateRule = async (rule: Rule) => {
@@ -407,112 +304,42 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       return;
     }
 
-    client.setChatId(`agentloop-${Date.now()}`);
-
     setIsActivating(true);
-    setActivateMessages([]);
+    activateStream.clearMessages();
     setActivatingRule(rule);
     const fullMessage = `请激活以下智能体规则：\n\n名称：${rule.name}\n显示名称：${rule.displayName || rule.name}\n描述：${rule.description}\n触发类型：${rule.triggerType}\n\n请执行激活操作并返回结果。`;
-    client.send(fullMessage);
 
-    let handled = false;
-
-    const handleActivateEvent = (event: NanobotOutboundEvent) => {
-      if (handled) return;
-
-      if (event.eventType === 'progress') {
-        const text = event.content;
-        const toolHint = event.metadata?._tool_hint;
-        const thinking = event.metadata?._thinking as string | undefined;
-
-        setActivateMessages(prev => {
-          const msgs = [...prev];
-          if (thinking) {
-            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
-            if (thinkIdx >= 0) {
-              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
-            } else {
-              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
-            }
-          }
-          if (toolHint && typeof toolHint === 'string') {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              const existingIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
-              }
-            }
-          }
-          if (text) {
-            const textTarget = msgs[msgs.length - 1];
-            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
-              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
-            } else {
-              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
-            }
-          }
-          return msgs;
-        });
-        client.ack(event.eventId);
-      } else if (event.eventType === 'tool_hint') {
-        const toolContent = event.content;
-        if (toolContent) {
-          const toolInfo = extractToolInfo(toolContent);
-          if (toolInfo) {
-            setActivateMessages(prev => {
-              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
-              }
-              return prev;
-            });
-          }
+    activateStream.startStream(client, fullMessage, undefined, async () => {
+      try {
+        const newStatus = rule.status === 'disabled' ? 'active' : 'active';
+        const updated = await updateRuleStatus(rule.id, newStatus);
+        if (updated) {
+          invalidateRulesCache();
+          await fetchRules();
+          await fetchMonitorStats();
+          showToast('success', `智能体「${updated.displayName || updated.name}」已激活`, 4000);
+        } else {
+          showToast('error', '激活失败，请重试');
         }
-        client.ack(event.eventId);
-      } else if (event.eventType === 'final' && event.content) {
-        handled = true;
-        client.ack(event.eventId);
-        eventHandlerRef.current?.();
-        eventHandlerRef.current = null;
-        (async () => {
-          try {
-            const newStatus = rule.status === 'disabled' ? 'active' : 'active';
-            const updated = await updateRuleStatus(rule.id, newStatus);
-            if (updated) {
-              invalidateRulesCache();
-              await fetchRules();
-              await fetchMonitorStats();
-              showToast('success', `智能体「${updated.displayName || updated.name}」已激活`, 4000);
-            } else {
-              showToast('error', '激活失败，请重试');
-            }
-          } catch (e) {
-            console.error('激活规则失败:', e);
-            showToast('error', '激活智能体时出错');
-          } finally {
-            setIsActivating(false);
-            setActivateMessages([]);
-            setActivatingRule(null);
-            setShowActivate(false);
-          }
-        })();
-      } else if (event.eventType === 'error') {
-        handled = true;
-        setIsActivating(false);
-        setActivateMessages([]);
-        setActivatingRule(null);
+      } catch (e) {
+        console.error('激活规则失败:', e);
         showToast('error', '激活智能体时出错');
+      } finally {
+        setIsActivating(false);
+        activateStream.clearMessages();
+        setActivatingRule(null);
+        setShowActivate(false);
       }
-    };
-
-    const unsubscribe = client.onEvent(handleActivateEvent);
-    eventHandlerRef.current?.();
-    eventHandlerRef.current = unsubscribe;
+    }, () => {
+      setIsActivating(false);
+      activateStream.clearMessages();
+      setActivatingRule(null);
+      showToast('error', '激活智能体时出错');
+    });
   };
 
   const openTestRunModal = (rule: Rule) => {
-    setTestRunMessages([]);
+    testStream.clearMessages();
     setTestRunReport(null);
     setTestRunRule(rule);
     setIsTestRunning(false);
@@ -529,14 +356,33 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       return;
     }
 
-    client.setChatId(`agentloop-${Date.now()}`);
-
     setIsTestRunning(true);
-    setTestRunMessages([]);
+    testStream.clearMessages();
     setTestRunReport(null);
 
-    const fullMessage = `${TEST_RUN_PROMPT} ${testRunRule.name}`;
-    client.send(fullMessage, undefined, {
+    const fullMessage = `${TEST_RUN_PROMPT} ${testRunRule.name}\n\n规则详情：\n${JSON.stringify({ id: testRunRule.id, name: testRunRule.name, triggerType: testRunRule.triggerType, triggerConfig: testRunRule.triggerConfig, skills: testRunRule.skills, flow: testRunRule.flow, systemPrompt: testRunRule.systemPrompt })}`;
+
+    testStream.startStream(client, fullMessage, undefined, (event) => {
+      let reportContent = event.content || '';
+      if (!reportContent) {
+        const multimodal = event.multimodalResponse || event.multimodal_response;
+        if (multimodal?.content) {
+          reportContent = multimodal.content;
+        }
+      }
+      setTestRunReport(reportContent);
+      const multimodal = event.multimodalResponse || event.multimodal_response;
+      if (multimodal) {
+        setTestRunDocs(extractDocuments(multimodal));
+        setTestRunImages(extractImages(multimodal));
+      }
+      setIsTestRunning(false);
+      showToast('success', `执行完成`, 3000);
+    }, () => {
+      setIsTestRunning(false);
+      setTestRunReport(null);
+      showToast('error', '测试运行时出错');
+    }, {
       session_params: {
         context_policy: {
           enabled: true,
@@ -544,95 +390,6 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
         }
       }
     });
-
-    let handled = false;
-
-    const handleTestEvent = (event: NanobotOutboundEvent) => {
-      if (handled) return;
-
-      if (event.eventType === 'progress') {
-        const text = event.content;
-        const toolHint = event.metadata?._tool_hint;
-        const thinking = event.metadata?._thinking as string | undefined;
-
-        setTestRunMessages(prev => {
-          const msgs = [...prev];
-          if (thinking) {
-            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
-            if (thinkIdx >= 0) {
-              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
-            } else {
-              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
-            }
-          }
-          if (toolHint && typeof toolHint === 'string') {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              const existingIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
-              }
-            }
-          }
-          if (text) {
-            const textTarget = msgs[msgs.length - 1];
-            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
-              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
-            } else {
-              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
-            }
-          }
-          return msgs;
-        });
-        client.ack(event.eventId);
-      } else if (event.eventType === 'tool_hint') {
-        const toolContent = event.content;
-        if (toolContent) {
-          const toolInfo = extractToolInfo(toolContent);
-          if (toolInfo) {
-            setTestRunMessages(prev => {
-              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
-              }
-              return prev;
-            });
-          }
-        }
-        client.ack(event.eventId);
-      } else if (event.eventType === 'final' && event.done) {
-        handled = true;
-        client.ack(event.eventId);
-        eventHandlerRef.current?.();
-        eventHandlerRef.current = null;
-
-        let reportContent = event.content || '';
-        if (!reportContent) {
-          const multimodal = event.multimodalResponse || event.multimodal_response;
-          if (multimodal?.content) {
-            reportContent = multimodal.content;
-          }
-        }
-
-        setTestRunReport(reportContent);
-        const multimodal = event.multimodalResponse || event.multimodal_response;
-        if (multimodal) {
-          setTestRunDocs(extractDocuments(multimodal));
-          setTestRunImages(extractImages(multimodal));
-        }
-        setIsTestRunning(false);
-        showToast('success', `执行完成`, 3000);
-      } else if (event.eventType === 'error') {
-        handled = true;
-        setIsTestRunning(false);
-        setTestRunReport(null);
-        showToast('error', '测试运行时出错');
-      }
-    };
-
-    const unsubscribe = client.onEvent(handleTestEvent);
-    eventHandlerRef.current?.();
-    eventHandlerRef.current = unsubscribe;
   };
 
   const handleDeleteRule = async (rule: Rule) => {
@@ -668,105 +425,35 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       return;
     }
 
-    client.setChatId(`agentloop-${Date.now()}`);
-
+    const currentRuleId = selectedRule.id;
+    const currentRuleName = selectedRule.name;
+    const currentRuleDisplayName = selectedRule.displayName || selectedRule.name;
     const fullMessage = `请用agent-builder技能帮我修改智能体「${selectedRule.name}」。\n\n修改需求：${description || '(见图片)'}`;
-    client.send(fullMessage, attachments);
 
-    let handled = false;
-
-    const handleEditEvent = async (event: NanobotOutboundEvent) => {
-      if (handled) return;
-      const currentRule = selectedRule;
-      const currentRuleId = currentRule?.id;
-      const currentRuleName = currentRule?.name;
-      const currentRuleDisplayName = currentRule?.displayName || currentRule?.name;
-      if (!currentRule) return;
-      
-      if (event.eventType === 'progress') {
-        const text = event.content;
-        const toolHint = event.metadata?._tool_hint;
-        const thinking = event.metadata?._thinking as string | undefined;
-
-        setEditMessages(prev => {
-          const msgs = [...prev];
-          if (thinking) {
-            const thinkIdx = msgs.findIndex(m => m.type === 'thinking');
-            if (thinkIdx >= 0) {
-              msgs[thinkIdx] = { ...msgs[thinkIdx], content: thinking };
-            } else {
-              msgs.push({ id: `thinking-${event.eventId}`, type: 'thinking', content: thinking });
-            }
-          }
-          if (toolHint && typeof toolHint === 'string') {
-            const toolInfo = extractToolInfo(toolHint);
-            if (toolInfo) {
-              const existingToolIdx = msgs.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingToolIdx < 0) {
-                msgs.push({ id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args });
-              }
-            }
-          }
-          if (text) {
-            const textTarget = msgs[msgs.length - 1];
-            if (textTarget && textTarget.type === 'text' && textTarget.id.startsWith('text-')) {
-              msgs[msgs.length - 1] = { ...textTarget, content: textTarget.content + text };
-            } else {
-              msgs.push({ id: `text-${event.eventId}`, type: 'text', content: text });
-            }
-          }
-          return msgs;
-        });
-        client.ack(event.eventId);
-      } else if (event.eventType === 'tool_hint') {
-        const toolContent = event.content;
-        if (toolContent) {
-          const toolInfo = extractToolInfo(toolContent);
-          if (toolInfo) {
-            setEditMessages(prev => {
-              const existingIdx = prev.findIndex(m => m.type === 'tool_use' && m.id === `tool-${event.eventId}`);
-              if (existingIdx < 0) {
-                return [...prev, { id: `tool-${event.eventId}`, type: 'tool_use', content: '', name: toolInfo.name, input: toolInfo.args }];
-              }
-              return prev;
-            });
-          }
+    editStream.startStream(client, fullMessage, attachments, async () => {
+      setEditPanelVisible(false);
+      editStream.clearMessages();
+      invalidateRulesCache();
+      const timeoutPromise = new Promise<Rule[]>((_, reject) => {
+        setTimeout(() => reject(new Error('加载规则超时')), 15000);
+      });
+      try {
+        const latestRules = await Promise.race([loadRules(), timeoutPromise]);
+        setRules(latestRules);
+        const updatedRule = latestRules.find(r => r.name === currentRuleName) || latestRules.find(r => r.id === currentRuleId);
+        if (updatedRule) {
+          setSelectedRule(updatedRule);
         }
-        client.ack(event.eventId);
-      } else if (event.eventType === 'final') {
-        handled = true;
-        client.ack(event.eventId);
-        eventHandlerRef.current?.();
-        eventHandlerRef.current = null;
-        setEditPanelVisible(false);
-        setEditMessages([]);
-        invalidateRulesCache();
-        const timeoutPromise = new Promise<Rule[]>((_, reject) => {
-          setTimeout(() => reject(new Error('加载规则超时')), 15000);
-        });
-        try {
-          const latestRules = await Promise.race([loadRules(), timeoutPromise]);
-          setRules(latestRules);
-          const updatedRule = latestRules.find(r => r.name === currentRuleName) || latestRules.find(r => r.id === currentRuleId);
-          if (updatedRule) {
-            setSelectedRule(updatedRule);
-          }
-          showToast('success', `智能体「${currentRuleDisplayName}」修改成功`, 4000);
-        } catch (e) {
-          console.error('加载规则失败:', e);
-          showToast('error', '修改成功但刷新规则失败，请手动刷新页面');
-        }
-      } else if (event.eventType === 'error') {
-        handled = true;
-        setEditPanelVisible(false);
-        setEditMessages([]);
-        showToast('error', `修改规则时出错: ${event.content || '未知错误'}`);
+        showToast('success', `智能体「${currentRuleDisplayName}」修改成功`, 4000);
+      } catch (e) {
+        console.error('加载规则失败:', e);
+        showToast('error', '修改成功但刷新规则失败，请手动刷新页面');
       }
-    };
-
-    const unsubscribe = client.onEvent(handleEditEvent);
-    eventHandlerRef.current?.();
-    eventHandlerRef.current = unsubscribe;
+    }, (event) => {
+      setEditPanelVisible(false);
+      editStream.clearMessages();
+      showToast('error', `修改规则时出错: ${event.content || '未知错误'}`);
+    });
   };
 
   const filteredRules = rules.filter(r => {
@@ -781,14 +468,14 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
   if (selectedRule) {
     return (
       <>
-        <RuleDetail key={selectedRule.id} rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={handleEditRule} onTestRun={() => openTestRunModal(selectedRule)} editMessages={editMessages} setEditMessages={setEditMessages} editPanelVisible={editPanelVisible} setEditPanelVisible={setEditPanelVisible} />
+        <RuleDetail key={selectedRule.id} rule={selectedRule} onBack={() => setSelectedRule(null)} onEdit={handleEditRule} onTestRun={() => openTestRunModal(selectedRule)} editMessages={editStream.messages} clearEditMessages={editStream.clearMessages} editPanelVisible={editPanelVisible} setEditPanelVisible={setEditPanelVisible} />
         {showTestRun && testRunRule && (
           <TestRunModal
             rule={testRunRule}
-            onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); setTestRunMessages([]); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
+            onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); testStream.clearMessages(); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
             onExecute={handleTestRun}
             isRunning={isTestRunning}
-            messages={testRunMessages}
+            messages={testStream.messages}
             report={testRunReport}
             docs={testRunDocs}
             images={testRunImages}
@@ -924,11 +611,11 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       {/* Create Modal */}
       {showCreate && (
         <CreateModal
-          onClose={() => { setShowCreate(false); setDescription(''); setIsGenerating(false); setGenMessages([]); }}
+          onClose={() => { setShowCreate(false); setDescription(''); setIsGenerating(false); genStream.clearMessages(); }}
           description={description}
           setDescription={setDescription}
           isGenerating={isGenerating}
-          genMessages={genMessages}
+          genMessages={genStream.messages}
           onGenerate={handleGenerateRule}
         />
       )}
@@ -936,19 +623,19 @@ export function AgentOrchestratorPage({ onClose, getClient, getApiClient }: Prop
       {showActivate && activatingRule && (
         <ActivateModal
           rule={activatingRule}
-          onClose={() => { setShowActivate(false); setActivatingRule(null); setIsActivating(false); setActivateMessages([]); }}
+          onClose={() => { setShowActivate(false); setActivatingRule(null); setIsActivating(false); activateStream.clearMessages(); }}
           isActivating={isActivating}
-          messages={activateMessages}
+          messages={activateStream.messages}
         />
       )}
 
       {showTestRun && testRunRule && (
         <TestRunModal
           rule={testRunRule}
-          onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); setTestRunMessages([]); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
+          onClose={() => { setShowTestRun(false); setTestRunRule(null); setIsTestRunning(false); testStream.clearMessages(); setTestRunReport(null); setTestRunDocs([]); setTestRunImages([]); }}
           onExecute={handleTestRun}
           isRunning={isTestRunning}
-          messages={testRunMessages}
+          messages={testStream.messages}
           report={testRunReport}
           docs={testRunDocs}
           images={testRunImages}
@@ -1116,7 +803,7 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
   description: string;
   setDescription: (v: string) => void;
   isGenerating: boolean;
-  genMessages: GenerationMessage[];
+  genMessages: StreamMessage[];
   onGenerate: (attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void;
 }) {
   const [attachments, setAttachments] = useState<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>([]);
@@ -1270,7 +957,7 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
   rule: Rule;
   onClose: () => void;
   isActivating: boolean;
-  messages: GenerationMessage[];
+  messages: StreamMessage[];
 }) {
   return (
     <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
@@ -1340,7 +1027,7 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
   );
 }
 
-function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, setEditMessages, editPanelVisible, setEditPanelVisible }: { rule: Rule; onBack: () => void; onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void; onTestRun: () => void; editMessages: GenerationMessage[]; setEditMessages: React.Dispatch<React.SetStateAction<GenerationMessage[]>>; editPanelVisible: boolean; setEditPanelVisible: (v: boolean) => void }) {
+function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, clearEditMessages, editPanelVisible, setEditPanelVisible }: { rule: Rule; onBack: () => void; onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void; onTestRun: () => void; editMessages: StreamMessage[]; clearEditMessages: () => void; editPanelVisible: boolean; setEditPanelVisible: (v: boolean) => void }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
   const [editDescription, setEditDescription] = useState('');
   const [attachments, setAttachments] = useState<Array<{ id: string; mimeType: string; fileName: string; content: string; preview: string }>>([]);
@@ -1350,7 +1037,7 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, setEditMess
     setEditDescription('');
     setAttachments([]);
     setIsEditing(false);
-    setEditMessages([]);
+    clearEditMessages();
     setEditPanelVisible(true);
   };
 
@@ -1363,7 +1050,7 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, setEditMess
 
   const handleEdit = (description: string, atts?: Array<{ mimeType: string; fileName: string; content: string }>) => {
     setIsEditing(true);
-    setEditMessages([]);
+    clearEditMessages();
     onEdit(description, atts);
   };
 
@@ -1448,7 +1135,7 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
   onClose: () => void;
   onExecute: () => void;
   isRunning: boolean;
-  messages: GenerationMessage[];
+  messages: StreamMessage[];
   report: string | null;
   docs: DocumentInfo[];
   images: DocumentInfo[];
@@ -1583,7 +1270,7 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
   onClose: () => void;
   onEdit: (description: string, attachments?: Array<{ mimeType: string; fileName: string; content: string }>) => void;
   isEditing: boolean;
-  messages: GenerationMessage[];
+  messages: StreamMessage[];
 }) {
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
