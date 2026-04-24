@@ -897,31 +897,12 @@ function CreateModal({ onClose, description, setDescription, isGenerating, genMe
             </div>
           )}
           {isGenerating && genMessages.length > 0 && (
-            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-64 overflow-y-auto">
+            <div className="mt-4 p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-72 overflow-y-auto">
               <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
                 <Loader2 size={14} className="animate-spin text-pc-accent" />
                 <span>生成中...</span>
               </div>
-              <div className="space-y-1.5">
-                {genMessages.map((msg) => (
-                  <div key={msg.id} className="text-xs">
-                    {msg.type === 'thinking' && (
-                      <div className="flex items-start gap-2 text-pc-text-muted">
-                        <span>💭</span><span className="whitespace-pre-wrap break-words">{msg.content}</span>
-                      </div>
-                    )}
-                    {msg.type === 'tool_use' && (
-                      <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
-                        <Zap size={11} className="text-pc-accent" />
-                        <span className="text-pc-text">调用: {msg.name}</span>
-                      </div>
-                    )}
-                    {msg.type === 'text' && (
-                      <div className="text-pc-text-muted whitespace-pre-wrap break-words">{msg.content}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <StreamMessageList messages={genMessages} />
             </div>
           )}
           <div className="mt-4 p-3 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border">
@@ -986,31 +967,12 @@ function ActivateModal({ rule, onClose, isActivating, messages }: {
           </div>
 
           {isActivating && messages.length > 0 && (
-            <div className="p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-64 overflow-y-auto">
+            <div className="p-4 rounded-xl bg-[var(--pc-bg-base)] border border-pc-border max-h-72 overflow-y-auto">
               <div className="flex items-center gap-2 mb-3 text-sm font-medium text-pc-text">
                 <Loader2 size={14} className="animate-spin text-pc-accent" />
                 <span>激活中...</span>
               </div>
-              <div className="space-y-1.5">
-                {messages.map((msg) => (
-                  <div key={msg.id} className="text-xs">
-                    {msg.type === 'thinking' && (
-                      <div className="flex items-start gap-2 text-pc-text-muted">
-                        <span>💭</span><span>{msg.content.slice(0, 150)}...</span>
-                      </div>
-                    )}
-                    {msg.type === 'tool_use' && (
-                      <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
-                        <Zap size={11} className="text-pc-accent" />
-                        <span className="text-pc-text">调用: {msg.name}</span>
-                      </div>
-                    )}
-                    {msg.type === 'text' && (
-                      <div className="text-pc-text-muted">{msg.content.slice(0, 80)}...</div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <StreamMessageList messages={messages} autoScroll />
             </div>
           )}
         </div>
@@ -1130,6 +1092,33 @@ function RuleDetail({ rule, onBack, onEdit, onTestRun, editMessages, clearEditMe
 
 const markdownComponents = { pre: CodeBlock };
 
+function StreamMessageList({ messages, autoScroll = false }: { messages: StreamMessage[]; autoScroll?: boolean }) {
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, autoScroll]);
+
+  if (messages.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {messages.map((msg) => (
+        <div key={msg.id}>
+          {msg.type === 'thinking' && <ThinkingBlock text={msg.content} />}
+          {msg.type === 'tool_use' && <ToolCall name={msg.name || 'tool'} input={msg.input} />}
+          {msg.type === 'text' && msg.content && (
+            <div className="markdown-body">
+              <LazyMarkdown components={markdownComponents}>{msg.content}</LazyMarkdown>
+            </div>
+          )}
+        </div>
+      ))}
+      {autoScroll && <div ref={endRef} />}
+    </div>
+  );
+}
+
 function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, docs, images }: {
   rule: Rule;
   onClose: () => void;
@@ -1140,12 +1129,6 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
   docs: DocumentInfo[];
   images: DocumentInfo[];
 }) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   return (
     <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[85vh] bg-[var(--pc-bg-surface)] rounded-2xl border border-pc-border shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1174,28 +1157,13 @@ function TestRunModal({ rule, onClose, onExecute, isRunning, messages, report, d
 
           {(messages.length > 0 || isRunning) && (
             <div className="space-y-3 mb-4">
-              {messages.map((msg) => (
-                <div key={msg.id}>
-                  {msg.type === 'thinking' && (
-                    <ThinkingBlock text={msg.content} />
-                  )}
-                  {msg.type === 'tool_use' && (
-                    <ToolCall name={msg.name || 'tool'} input={msg.input} />
-                  )}
-                  {msg.type === 'text' && msg.content && (
-                    <div className="markdown-body">
-                      <LazyMarkdown components={markdownComponents}>{msg.content}</LazyMarkdown>
-                    </div>
-                  )}
-                </div>
-              ))}
+              <StreamMessageList messages={messages} autoScroll />
               {isRunning && (
                 <div className="flex items-center gap-2 text-sm text-pc-text-muted">
                   <Loader2 size={14} className="animate-spin text-pc-accent" />
                   <span>执行中...</span>
                 </div>
               )}
-              <div ref={messagesEndRef} />
             </div>
           )}
 
@@ -1351,25 +1319,8 @@ function EditSidePanel({ visible, rule, description, setDescription, attachments
               <Loader2 size={14} className="animate-spin text-pc-accent" />
               <span>修改中...</span>
             </div>
-            <div className="space-y-1.5 max-h-64 overflow-y-auto">
-              {messages.map((msg) => (
-                <div key={msg.id} className="text-xs">
-                  {msg.type === 'thinking' && (
-                    <div className="flex items-start gap-2 text-pc-text-muted">
-                      <span>💭</span><span className="whitespace-pre-wrap break-words">{msg.content}</span>
-                    </div>
-                  )}
-                  {msg.type === 'tool_use' && (
-                    <div className="flex items-center gap-2 px-2 py-1 rounded bg-[var(--pc-accent-glow)]/30">
-                      <Zap size={11} className="text-pc-accent" />
-                      <span className="text-pc-text">调用: {msg.name}</span>
-                    </div>
-                  )}
-                  {msg.type === 'text' && (
-                    <div className="text-pc-text-muted whitespace-pre-wrap break-words">{msg.content}</div>
-                  )}
-                </div>
-              ))}
+            <div className="max-h-72 overflow-y-auto">
+              <StreamMessageList messages={messages} autoScroll />
             </div>
           </div>
         ) : (
